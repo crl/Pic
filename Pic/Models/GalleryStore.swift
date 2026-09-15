@@ -138,16 +138,16 @@ final class GalleryStore: ObservableObject {
 
     private func loadCurrent() {
         spatialError = nil
-        depthMap = nil
-        bokehImage = nil
-        bokehRevision = 0
-        depthSourceLabel = nil
         bokehTask?.cancel()
         spatialTask?.cancel()
 
         guard let url = currentURL else {
             currentImage = nil
             pixelSize = .zero
+            depthMap = nil
+            bokehImage = nil
+            bokehRevision = 0
+            depthSourceLabel = nil
             isSpatialMode = false
             return
         }
@@ -161,7 +161,13 @@ final class GalleryStore: ObservableObject {
         currentImage = image
         pixelSize = image.pixelSize
 
-        if isSpatialMode {
+        let staySpatial = isSpatialMode
+        depthMap = nil
+        bokehImage = nil
+        bokehRevision = 0
+        depthSourceLabel = nil
+
+        if staySpatial {
             spatialTask = Task { await enableSpatial() }
         }
     }

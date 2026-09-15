@@ -4,6 +4,7 @@ struct ImageCanvas: View {
     let image: NSImage
     let pixelSize: CGSize
     let mode: DisplayMode
+    var showBackdrop: Bool = true
 
     var body: some View {
         GeometryReader { proxy in
@@ -16,19 +17,19 @@ struct ImageCanvas: View {
         }
     }
 
-    private var checkerboard: some View {
-        CheckerboardView()
-    }
-
     private func fittedImage(in size: CGSize) -> some View {
-        ZStack {
-            checkerboard
+        let fit = Self.aspectFit(pixelSize, in: size)
+        return ZStack {
+            if showBackdrop {
+                CheckerboardView()
+                    .frame(width: fit.width, height: fit.height)
+            }
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
-                .scaledToFit()
-                .frame(width: size.width, height: size.height)
+                .frame(width: fit.width, height: fit.height)
         }
+        .frame(width: size.width, height: size.height)
     }
 
     private func actualImage(in size: CGSize) -> some View {
@@ -36,8 +37,10 @@ struct ImageCanvas: View {
         let height = max(pixelSize.height, 1)
         return ScrollView([.horizontal, .vertical]) {
             ZStack {
-                checkerboard
-                    .frame(width: width, height: height)
+                if showBackdrop {
+                    CheckerboardView()
+                        .frame(width: width, height: height)
+                }
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.none)
@@ -46,6 +49,15 @@ struct ImageCanvas: View {
             .frame(minWidth: size.width, minHeight: size.height)
             .frame(width: max(width, size.width), height: max(height, size.height))
         }
+    }
+
+    private static func aspectFit(_ image: CGSize, in container: CGSize) -> CGSize {
+        let imageAspect = image.width / max(image.height, 1)
+        let containerAspect = container.width / max(container.height, 1)
+        if imageAspect > containerAspect {
+            return CGSize(width: container.width, height: container.width / imageAspect)
+        }
+        return CGSize(width: container.height * imageAspect, height: container.height)
     }
 }
 

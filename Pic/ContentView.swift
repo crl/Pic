@@ -8,6 +8,12 @@ struct ContentView: View {
     @State private var tiltSettling = false
     @State private var spatialOpacity: Double = 0
     @State private var keepSpatialLayer = false
+    @State private var shownImage: NSImage?
+    @State private var shownPixelSize: CGSize = .zero
+    @State private var incomingImage: NSImage?
+    @State private var incomingPixelSize: CGSize = .zero
+    @State private var incomingOpacity: Double = 0
+    @State private var fadeGeneration = 0
 
     var body: some View {
         ZStack {
@@ -21,6 +27,16 @@ struct ContentView: View {
                 viewer
                     .onChange(of: store.isSpatialMode) { _, enabled in
                         handleSpatialModeChange(enabled)
+                    }
+                    .onChange(of: store.currentURL) { _, _ in
+                        handleImageChange()
+                    }
+                    .onChange(of: store.depthMap != nil) { _, hasDepth in
+                        handleDepthAvailability(hasDepth)
+                    }
+                    .onAppear {
+                        shownImage = store.currentImage
+                        shownPixelSize = store.pixelSize
                     }
                 overlayChrome
             }
@@ -62,11 +78,99 @@ struct ContentView: View {
                 spatialLayer(depth: depth, original: original)
             }
 
-            if let image = store.currentImage {
-                ImageCanvas(image: image, pixelSize: store.pixelSize, mode: store.displayMode)
-                    .opacity(1 - spatialOpacity)
-                    .allowsHitTesting(spatialOpacity < 0.5)
+            imageStack
+                .opacity(twoDOpacity)
+                .allowsHitTesting(spatialOpacity < 0.5)
+        }
+    }
+
+    private var spatialCovering: Bool {
+        keepSpatialLayer && store.depthMap != nil
+    }
+
+    private var twoDOpacity: Double {
+        spatialCovering ? 1 - spatialOpacity : 1
+    }
+
+    private var imageStack: some View {
+        ZStack {
+            if let shownImage {
+                DouyinLetterbox(image: shownImage)
             }
+            if let incomingImage {
+                DouyinLetterbox(image: incomingImage)
+                    .opacity(incomingOpacity)
+            }
+
+            if let shownImage {
+                ImageCanvas(
+                    image: shownImage,
+                    pixelSize: shownPixelSize,
+                    mode: store.displayMode,
+                    showBackdrop: true
+                )
+            }
+            if let incomingImage {
+                ImageCanvas(
+                    image: incomingImage,
+                    pixelSize: incomingPixelSize,
+                    mode: store.displayMode,
+                    showBackdrop: false
+                )
+                .opacity(incomingOpacity)
+            }
+        }
+    }
+
+    private func handleImageChange() {
+        guard let image = store.currentImage else {
+            fadeGeneration += 1
+            shownImage = nil
+            incomingImage = nil
+            incomingOpacity = 0
+            return
+        }
+
+        if shownImage == nil {
+            shownImage = image
+            shownPixelSize = store.pixelSize
+            incomingImage = nil
+            incomingOpacity = 0
+            return
+        }
+
+        fadeGeneration += 1
+        let generation = fadeGeneration
+        incomingImage = image
+        incomingPixelSize = store.pixelSize
+        incomingOpacity = 0
+        withAnimation(.easeInOut(duration: 0.32)) {
+            incomingOpacity = 1
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            guard generation == fadeGeneration else { return }
+            shownImage = image
+            shownPixelSize = store.pixelSize
+            incomingImage = nil
+            incomingOpacity = 0
+        }
+    }
+
+    private func handleDepthAvailability(_ hasDepth: Bool) {
+        if !hasDepth {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                spatialOpacity = 0
+            }
+            return
+        }
+        guard store.isSpatialMode else { return }
+        keepSpatialLayer = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 160_000_000)
+            revealSpatial()
         }
     }
 
