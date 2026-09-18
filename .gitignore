@@ -4,3 +4,8 @@ DerivedData/
 .derivedData/
 .build/
 *.xcuserstate
+PicWin/node_modules/
+PicWin/out/
+PicWin/dist/
+PicWin/release/
+PicWin/resources/models/*.onnx
