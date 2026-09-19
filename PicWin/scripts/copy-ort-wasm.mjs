@@ -14,7 +14,10 @@ if (!existsSync(dist)) {
 }
 
 for (const name of readdirSync(dist)) {
-  if (name.endsWith('.wasm')) {
+  if (
+    name.startsWith('ort-wasm-simd-threaded') &&
+    (name.endsWith('.wasm') || name.endsWith('.mjs'))
+  ) {
     copyFileSync(join(dist, name), join(dest, name))
   }
 }

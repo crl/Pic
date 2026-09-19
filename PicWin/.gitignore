@@ -6,5 +6,7 @@ resources/models/*.onnx
 resources/sample.png
 public/ort/*
 !public/ort/.gitkeep
+public/models/*
+!public/models/.gitkeep
 *.log
 .DS_Store

@@ -9,3 +9,4 @@ PicWin/out/
 PicWin/dist/
 PicWin/release/
 PicWin/resources/models/*.onnx
+PicWin/public/models/*.onnx

@@ -307,7 +307,7 @@ function registerIpc(): void {
 
   ipcMain.handle('read-file', async (_event, target: string) => {
     const buf = await readFile(target)
-    return Uint8Array.from(buf)
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
   })
 
   ipcMain.handle('get-model-path', async () => {

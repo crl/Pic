@@ -1,52 +1,54 @@
-import wasmSimd from 'onnxruntime-web/dist/ort-wasm-simd-threaded.wasm?url'
-import wasmJsep from 'onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm?url'
-import wasmAsyncify from 'onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm?url'
-import wasmJspi from 'onnxruntime-web/dist/ort-wasm-simd-threaded.jspi.wasm?url'
 import { DepthError, DepthMap, depthErrors } from './DepthMap'
 
 let sessionPromise: Promise<import('onnxruntime-web').InferenceSession> | null = null
 let ortModule: typeof import('onnxruntime-web') | null = null
 
 function wasmPrefix(): string {
-  return new URL('ort/', `${window.location.origin}/`).href
+  return new URL(`${import.meta.env.BASE_URL}ort/`, window.location.href).href
 }
 
 async function loadOrt() {
   if (ortModule) return ortModule
-  const ort = await import('onnxruntime-web')
+  const ort = await import('onnxruntime-web/wasm')
+  const prefix = wasmPrefix()
   ort.env.wasm.numThreads = 1
   ort.env.wasm.simd = true
   ort.env.wasm.proxy = false
   ort.env.wasm.wasmPaths = {
-    'ort-wasm-simd-threaded.wasm': wasmSimd,
-    'ort-wasm-simd-threaded.jsep.wasm': wasmJsep,
-    'ort-wasm-simd-threaded.asyncify.wasm': wasmAsyncify,
-    'ort-wasm-simd-threaded.jspi.wasm': wasmJspi
-  }
-  if (!ort.env.wasm.wasmPaths['ort-wasm-simd-threaded.wasm']) {
-    ort.env.wasm.wasmPaths = wasmPrefix()
+    mjs: `${prefix}ort-wasm-simd-threaded.mjs`,
+    wasm: `${prefix}ort-wasm-simd-threaded.wasm`
   }
   ortModule = ort
   return ort
 }
 
+function tightBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
+  if (data instanceof Uint8Array) {
+    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))
+  }
+  return new Uint8Array(data.slice(0))
+}
+
+function modelUrl(): string {
+  return new URL(`${import.meta.env.BASE_URL}models/depth-anything-v2-small.onnx`, window.location.href).href
+}
+
 async function createSession() {
   try {
     const ort = await loadOrt()
-    const modelPath = await window.pic.getModelPath()
-    if (!modelPath) {
-      throw new DepthError(depthErrors.modelMissing)
-    }
-    const buffer = await window.pic.readFile(modelPath)
-    const model = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
     try {
-      return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
-    } catch (wasmError) {
-      try {
-        return await ort.InferenceSession.create(model, { executionProviders: ['webgpu'] })
-      } catch {
-        throw wasmError
+      return await ort.InferenceSession.create(modelUrl(), { executionProviders: ['wasm'] })
+    } catch {
+      const modelPath = await window.pic.getModelPath()
+      if (!modelPath) {
+        throw new DepthError(depthErrors.modelMissing)
       }
+      const buffer = await window.pic.readFile(modelPath)
+      const model = tightBytes(buffer)
+      if (model.byteLength < 1_000_000) {
+        throw new DepthError(depthErrors.modelMissing)
+      }
+      return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
     }
   } catch (error) {
     sessionPromise = null

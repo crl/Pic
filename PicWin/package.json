@@ -10,7 +10,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "fetch-model": "node scripts/fetch-model.mjs",
-    "postinstall": "node scripts/copy-ort-wasm.mjs",
+    "postinstall": "node scripts/copy-ort-wasm.mjs && node scripts/fetch-model.mjs",
     "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {
