@@ -148,6 +148,7 @@ interface Engine {
   currentTilt: { width: number; height: number }
   lastTime: number
   didReport: boolean
+  readyFrames: number
 }
 
 export function SpatialPhotoView({
@@ -176,14 +177,16 @@ export function SpatialPhotoView({
     const host = hostRef.current
     if (!host) return
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.setClearColor(0x000000, 0)
+    renderer.setClearAlpha(0)
     renderer.outputColorSpace = THREE.SRGBColorSpace
     Object.assign(renderer.domElement.style, {
       width: '100%',
       height: '100%',
-      display: 'block'
+      display: 'block',
+      background: 'transparent'
     })
     host.appendChild(renderer.domElement)
 
@@ -201,7 +204,8 @@ export function SpatialPhotoView({
       map: null,
       currentTilt: { width: 0, height: 0 },
       lastTime: performance.now(),
-      didReport: false
+      didReport: false,
+      readyFrames: 0
     }
     engineRef.current = engine
 
@@ -242,10 +246,17 @@ export function SpatialPhotoView({
         height: engine.currentTilt.height + (target.height - engine.currentTilt.height) * alpha
       }
       applyCamera(engine.currentTilt)
+      if (!engine.map || !engine.photo.geometry.getAttribute('position')) {
+        requestAnimationFrame(tick)
+        return
+      }
       renderer.render(scene, camera)
-      if (!engine.didReport && engine.map) {
-        engine.didReport = true
-        onFirstFrameRef.current?.()
+      if (!engine.didReport) {
+        engine.readyFrames += 1
+        if (engine.readyFrames >= 2) {
+          engine.didReport = true
+          onFirstFrameRef.current?.()
+        }
       }
       requestAnimationFrame(tick)
     }
@@ -266,15 +277,14 @@ export function SpatialPhotoView({
   useEffect(() => {
     const engine = engineRef.current
     if (!engine) return
-    engine.photo.geometry.dispose()
+    const previousGeo = engine.photo.geometry
     engine.photo.geometry = makeGeometry(depthMap, imageSize, focus, strength)
-    engine.didReport = false
+    previousGeo.dispose()
   }, [depthMap, imageSize.width, imageSize.height, focus.x, focus.y, strength])
 
   useEffect(() => {
     const engine = engineRef.current
     if (!engine) return
-    engine.map?.dispose()
     const map = new THREE.Texture(texture)
     map.colorSpace = THREE.SRGBColorSpace
     map.flipY = true
@@ -283,9 +293,12 @@ export function SpatialPhotoView({
     map.wrapT = THREE.ClampToEdgeWrapping
     map.minFilter = THREE.LinearFilter
     map.magFilter = THREE.LinearFilter
+    const previous = engine.map
     engine.map = map
     engine.photo.material.map = map
     engine.photo.material.needsUpdate = true
+    engine.renderer.initTexture(map)
+    previous?.dispose()
   }, [texture, textureRevision])
 
   return <div ref={hostRef} className="h-full w-full" />

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SpatialPhotoView } from '../depth/SpatialPhotoView'
 import { PanoramaView } from '../depth/PanoramaView'
 import { galleryStore, statusText, useGallery, canGoNext, canGoPrevious } from '../store/galleryStore'
 import { warmupDepth } from '../depth/DepthProvider'
+import { DepthMap } from '../depth/DepthMap'
 import { spreadToHaov } from '../depth/panorama'
-import { Size } from '../store/types'
+import { Point, Size } from '../store/types'
 import { EmptyDropView } from '../viewer/EmptyDropView'
 import { DouyinBottomFrost, DouyinLetterbox, ImageCanvas, aspectFitSize } from '../viewer/ImageCanvas'
 import { TitleBar } from './TitleBar'
@@ -92,6 +93,56 @@ export function App() {
   )
 }
 
+interface SpatialSnapshot {
+  path: string
+  kind: 'depth' | 'pano'
+  image: HTMLImageElement
+  depthMap: DepthMap | null
+  texture: HTMLCanvasElement | HTMLImageElement
+  textureRevision: number
+  pixelSize: Size
+  focus: Point
+  panoSpread: number
+  panoBend: number
+  panoKind: 'panorama' | 'turntable'
+  panoPanels: number
+}
+
+function snapshotFromStore(store: ReturnType<typeof useGallery>): SpatialSnapshot | null {
+  if (!store.currentPath || !store.currentImage) return null
+  if (store.isPanoramaMode) {
+    return {
+      path: store.currentPath,
+      kind: 'pano',
+      image: store.currentImage,
+      depthMap: null,
+      texture: store.currentImage,
+      textureRevision: 0,
+      pixelSize: store.pixelSize,
+      focus: store.focusNormalized,
+      panoSpread: store.panoSpread,
+      panoBend: store.panoBend,
+      panoKind: store.panoKind,
+      panoPanels: store.panoPanels
+    }
+  }
+  if (!store.depthMap) return null
+  return {
+    path: store.currentPath,
+    kind: 'depth',
+    image: store.currentImage,
+    depthMap: store.depthMap,
+    texture: store.bokehCanvas ?? store.currentImage,
+    textureRevision: store.bokehRevision,
+    pixelSize: store.pixelSize,
+    focus: store.focusNormalized,
+    panoSpread: store.panoSpread,
+    panoBend: store.panoBend,
+    panoKind: store.panoKind,
+    panoPanels: store.panoPanels
+  }
+}
+
 function Viewer() {
   const store = useGallery()
   const [tilt, setTilt] = useState({ width: 0, height: 0 })
@@ -103,8 +154,16 @@ function Viewer() {
   const [incoming, setIncoming] = useState<HTMLImageElement | null>(null)
   const [incomingSize, setIncomingSize] = useState<Size>(store.pixelSize)
   const [incomingOpacity, setIncomingOpacity] = useState(0)
+  const [shownSpatial, setShownSpatial] = useState<SpatialSnapshot | null>(null)
+  const [incomingSpatial, setIncomingSpatial] = useState<SpatialSnapshot | null>(null)
+  const [incomingSpatialOpacity, setIncomingSpatialOpacity] = useState(0)
   const fadeRef = useRef(0)
   const spatialTimer = useRef<number | null>(null)
+  const spatialCrossfadeRef = useRef(0)
+  const shownSpatialRef = useRef<SpatialSnapshot | null>(null)
+  const incomingSpatialRef = useRef<SpatialSnapshot | null>(null)
+  shownSpatialRef.current = shownSpatial
+  incomingSpatialRef.current = incomingSpatial
 
   useEffect(() => {
     const image = store.currentImage
@@ -139,31 +198,95 @@ function Viewer() {
     applyTilt({ width: 0, height: 0 }, false)
     if (store.isSpatialMode) {
       setKeepSpatialLayer(true)
-      setSpatialOpacity(0)
-      window.setTimeout(() => revealSpatial(), 160)
+      if (!store.spatialInstant) setSpatialOpacity(0)
     } else {
       setSpatialOpacity(0)
       if (spatialTimer.current) window.clearTimeout(spatialTimer.current)
       spatialTimer.current = window.setTimeout(() => {
-        if (!galleryStore.getSnapshot().isSpatialMode) setKeepSpatialLayer(false)
+        if (!galleryStore.getSnapshot().isSpatialMode) {
+          setKeepSpatialLayer(false)
+          setShownSpatial(null)
+          setIncomingSpatial(null)
+          setIncomingSpatialOpacity(0)
+          shownSpatialRef.current = null
+          incomingSpatialRef.current = null
+        }
       }, 380)
     }
   }, [store.isSpatialMode])
 
   useEffect(() => {
-    const pano = store.isPanoramaMode
-    if (!store.depthMap && !pano) {
-      setSpatialOpacity(0)
+    if (!store.isSpatialMode && !keepSpatialLayer) return
+    const snap = snapshotFromStore(store)
+    if (!snap) return
+    const shownSnap = shownSpatialRef.current
+    const incomingSnap = incomingSpatialRef.current
+    if (!shownSnap && !incomingSnap) {
+      setShownSpatial(snap)
       return
     }
-    if (!store.isSpatialMode) return
-    setKeepSpatialLayer(true)
-    window.setTimeout(() => revealSpatial(), 160)
-  }, [store.depthMap, store.isPanoramaMode])
+    if (shownSnap?.path === snap.path) {
+      setShownSpatial(snap)
+      if (incomingSnap) {
+        spatialCrossfadeRef.current += 1
+        setIncomingSpatial(null)
+        setIncomingSpatialOpacity(0)
+        if (incomingSnap.image !== snap.image && incomingSnap.image !== shownSnap.image) {
+          galleryStore.releaseImage(incomingSnap.image)
+        }
+      }
+      return
+    }
+    if (incomingSnap?.path === snap.path) {
+      setIncomingSpatial(snap)
+      return
+    }
+    spatialCrossfadeRef.current += 1
+    if (incomingSnap && incomingSnap.image !== snap.image && incomingSnap.image !== shownSnap?.image) {
+      galleryStore.releaseImage(incomingSnap.image)
+    }
+    setIncomingSpatial(snap)
+    setIncomingSpatialOpacity(0)
+  }, [
+    store.currentPath,
+    store.currentImage,
+    store.depthMap,
+    store.bokehRevision,
+    store.isSpatialMode,
+    store.isPanoramaMode,
+    store.panoKind,
+    store.panoPanels,
+    store.panoSpread,
+    store.panoBend,
+    store.focusNormalized.x,
+    store.focusNormalized.y,
+    keepSpatialLayer
+  ])
 
   const revealSpatial = (): void => {
     if (!galleryStore.getSnapshot().isSpatialMode) return
     setSpatialOpacity(1)
+  }
+
+  const revealIncomingSpatial = (path: string): void => {
+    if (incomingSpatialRef.current?.path !== path) return
+    revealSpatial()
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setIncomingSpatialOpacity(1))
+    })
+    const generation = ++spatialCrossfadeRef.current
+    window.setTimeout(() => {
+      if (generation !== spatialCrossfadeRef.current) return
+      const next = incomingSpatialRef.current
+      if (!next || next.path !== path) return
+      const previous = shownSpatialRef.current
+      setShownSpatial(next)
+      setIncomingSpatial(null)
+      setIncomingSpatialOpacity(0)
+      if (previous && previous.image !== next.image) {
+        galleryStore.releaseImage(previous.image)
+      }
+    }, 420)
   }
 
   const applyTilt = (value: { width: number; height: number }, settling: boolean): void => {
@@ -171,47 +294,17 @@ function Viewer() {
     setTilt(value)
   }
 
-  const isPano = store.isPanoramaMode
-  const spatialCovering = keepSpatialLayer && (store.depthMap != null || isPano)
-  const twoDOpacity = spatialCovering ? 1 - spatialOpacity : 1
-  const original = store.currentImage
+  const spatialOn = store.isSpatialMode && spatialOpacity >= 0.5
+  const spatialLayers = [shownSpatial, incomingSpatial].filter((layer, index, list): layer is SpatialSnapshot => {
+    return !!layer && list.findIndex((item) => item?.path === layer.path) === index
+  })
 
   return (
     <div className="relative h-full">
       <div className="absolute inset-0">
-        {keepSpatialLayer && original && isPano ? (
-          <div
-            className="absolute inset-0"
-            style={{ pointerEvents: store.isSpatialMode ? 'auto' : 'none' }}
-          >
-            <PanoramaView
-              image={original}
-              spread={store.panoSpread}
-              bend={store.panoBend}
-              kind={store.panoKind}
-              panels={store.panoPanels}
-              onFirstFrame={revealSpatial}
-            />
-          </div>
-        ) : null}
-        {keepSpatialLayer && store.depthMap && original && !isPano ? (
-          <SpatialLayer
-            depthReady
-            original={original}
-            tilt={tilt}
-            tiltSettling={tiltSettling}
-            onTilt={applyTilt}
-            onFirstFrame={revealSpatial}
-          />
-        ) : null}
-
         <div
           className="absolute inset-0"
-          style={{
-            opacity: twoDOpacity,
-            pointerEvents: spatialOpacity >= 0.5 ? 'none' : 'auto',
-            transition: 'opacity 380ms ease-in-out'
-          }}
+          style={{ pointerEvents: spatialOn ? 'none' : 'auto' }}
         >
           <div className="absolute inset-0">
             {shown ? <DouyinLetterbox image={shown} /> : null}
@@ -234,6 +327,57 @@ function Viewer() {
             ) : null}
           </div>
         </div>
+
+        {keepSpatialLayer && spatialLayers.length > 0 ? (
+          <div
+            className="absolute inset-0"
+            style={{
+              opacity: spatialOpacity,
+              transition: store.spatialInstant ? 'none' : 'opacity 320ms ease-out',
+              pointerEvents: spatialOn ? 'auto' : 'none'
+            }}
+          >
+            {spatialLayers.map((layer) => {
+              const isIncoming = incomingSpatial?.path === layer.path
+              const interactive = isIncoming ? incomingSpatialOpacity > 0.85 : !incomingSpatial
+              return (
+                <div
+                  key={layer.path}
+                  className="absolute inset-0"
+                  style={{
+                    opacity: isIncoming ? incomingSpatialOpacity : 1,
+                    transition: isIncoming ? 'opacity 360ms ease-in-out' : undefined,
+                    pointerEvents: interactive ? 'auto' : 'none'
+                  }}
+                >
+                  {layer.kind === 'pano' ? (
+                    <PanoramaView
+                      image={layer.image}
+                      spread={layer.panoSpread}
+                      bend={layer.panoBend}
+                      kind={layer.panoKind}
+                      panels={layer.panoPanels}
+                      onFirstFrame={
+                        isIncoming ? () => revealIncomingSpatial(layer.path) : revealSpatial
+                      }
+                    />
+                  ) : layer.depthMap ? (
+                    <SpatialLayer
+                      snapshot={layer}
+                      tilt={tilt}
+                      tiltSettling={tiltSettling}
+                      interactive={interactive}
+                      onTilt={applyTilt}
+                      onFirstFrame={
+                        isIncoming ? () => revealIncomingSpatial(layer.path) : revealSpatial
+                      }
+                    />
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
       </div>
       {store.spatialBusy ? (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
@@ -246,76 +390,81 @@ function Viewer() {
 }
 
 function SpatialLayer({
-  original,
+  snapshot,
   tilt,
   tiltSettling,
+  interactive,
   onTilt,
   onFirstFrame
 }: {
-  depthReady: boolean
-  original: HTMLImageElement
+  snapshot: SpatialSnapshot
   tilt: { width: number; height: number }
   tiltSettling: boolean
+  interactive: boolean
   onTilt: (value: { width: number; height: number }, settling: boolean) => void
   onFirstFrame: () => void
 }) {
   const store = useGallery()
   const hostRef = useRef<HTMLDivElement>(null)
   const [fit, setFit] = useState<Size>({ width: 0, height: 0 })
+  const depthMap = snapshot.depthMap
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = hostRef.current
     if (!node) return
     const apply = (): void => {
-      setFit(aspectFitSize(store.pixelSize, { width: node.clientWidth, height: node.clientHeight }))
+      setFit(aspectFitSize(snapshot.pixelSize, { width: node.clientWidth, height: node.clientHeight }))
     }
     apply()
     const observer = new ResizeObserver(apply)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [store.pixelSize.width, store.pixelSize.height])
+  }, [snapshot.pixelSize.width, snapshot.pixelSize.height])
 
-  if (!store.depthMap) return null
-  const texture = store.bokehCanvas ?? original
+  if (!depthMap) return null
 
   return (
-    <div ref={hostRef} className="absolute inset-0" style={{ pointerEvents: store.isSpatialMode ? 'auto' : 'none' }}>
-      <DouyinLetterbox image={original} />
+    <div ref={hostRef} className="absolute inset-0" style={{ pointerEvents: interactive ? 'auto' : 'none' }}>
+      <DouyinLetterbox image={snapshot.image} />
       <DouyinBottomFrost />
       <div className="absolute inset-0 flex items-center justify-center">
-        <div
-          className="relative"
-          style={{ width: Math.max(fit.width, 1), height: Math.max(fit.height, 1) }}
-          onMouseMove={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            onTilt(
-              {
-                width: ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1,
-                height: ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1
-              },
-              false
-            )
-          }}
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            galleryStore.setFocus({
-              x: (event.clientX - rect.left) / Math.max(rect.width, 1),
-              y: (event.clientY - rect.top) / Math.max(rect.height, 1)
-            })
-          }}
-        >
-          <SpatialPhotoView
-            texture={texture}
-            textureRevision={store.bokehRevision}
-            depthMap={store.depthMap}
-            imageSize={store.pixelSize}
-            focus={store.focusNormalized}
-            strength={store.parallaxAmount}
-            tilt={tilt}
-            tiltSettling={tiltSettling}
-            onFirstFrame={onFirstFrame}
-          />
-        </div>
+        {fit.width > 2 && fit.height > 2 ? (
+          <div
+            className="relative"
+            style={{ width: Math.max(fit.width, 1), height: Math.max(fit.height, 1) }}
+            onMouseMove={(event) => {
+              if (!interactive) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              onTilt(
+                {
+                  width: ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1,
+                  height: ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 2 - 1
+                },
+                false
+              )
+            }}
+            onClick={(event) => {
+              if (!interactive || snapshot.path !== store.currentPath) return
+              const rect = event.currentTarget.getBoundingClientRect()
+              galleryStore.setFocus({
+                x: (event.clientX - rect.left) / Math.max(rect.width, 1),
+                y: (event.clientY - rect.top) / Math.max(rect.height, 1)
+              })
+            }}
+          >
+            <SpatialPhotoView
+              texture={snapshot.texture}
+              textureRevision={snapshot.textureRevision}
+              depthMap={depthMap}
+              imageSize={snapshot.pixelSize}
+              focus={snapshot.focus}
+              strength={store.parallaxAmount}
+              tilt={tilt}
+              tiltSettling={tiltSettling}
+              onFirstFrame={onFirstFrame}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   )

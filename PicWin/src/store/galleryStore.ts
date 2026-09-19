@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { applyBokeh } from '../depth/bokeh'
 import { DepthMap } from '../depth/DepthMap'
-import { depthFor } from '../depth/DepthProvider'
+import { cachedDepth, depthFor } from '../depth/DepthProvider'
 import { depthSourceTitle } from '../depth/DepthMap'
 import { decodeImageFile, fileName, samePath } from './decodeImage'
 import { detectTurnaroundPanels, suggestedPanoControls } from '../depth/panorama'
@@ -30,6 +30,7 @@ export interface GallerySnapshot {
   panoBend: number
   panoKind: 'panorama' | 'turntable'
   panoPanels: number
+  spatialInstant: boolean
 }
 
 const listeners = new Set<() => void>()
@@ -56,7 +57,8 @@ const state: GallerySnapshot = {
   panoSpread: 0.5,
   panoBend: 0.38,
   panoKind: 'panorama',
-  panoPanels: 0
+  panoPanels: 0,
+  spatialInstant: false
 }
 
 let snapshot: GallerySnapshot = { ...state }
@@ -77,6 +79,33 @@ function patch(partial: Partial<GallerySnapshot>): void {
 
 function revokeImage(image: HTMLImageElement | null): void {
   if (image?.src.startsWith('blob:')) URL.revokeObjectURL(image.src)
+}
+
+const retainedImages: HTMLImageElement[] = []
+
+function retainPrevious(image: HTMLImageElement | null): void {
+  if (!image) return
+  retainedImages.push(image)
+  while (retainedImages.length > 6) {
+    const oldest = retainedImages.shift()
+    if (oldest && oldest !== state.currentImage) revokeImage(oldest)
+  }
+}
+
+function releaseRetained(): void {
+  for (const image of retainedImages) {
+    if (image !== state.currentImage) revokeImage(image)
+  }
+  retainedImages.length = 0
+}
+
+function releaseRetainedImage(image: HTMLImageElement | null): void {
+  if (!image || image === state.currentImage) return
+  const index = retainedImages.indexOf(image)
+  if (index >= 0) retainedImages.splice(index, 1)
+  window.setTimeout(() => {
+    if (image !== state.currentImage) revokeImage(image)
+  }, 160)
 }
 
 export const galleryStore = {
@@ -134,7 +163,7 @@ export const galleryStore = {
         revokeImage(image)
         return
       }
-      revokeImage(state.currentImage)
+      retainPrevious(state.currentImage)
       window.pic?.setTitle(file.name)
       patch({
         items: [file.name],
@@ -208,6 +237,9 @@ export const galleryStore = {
   },
   clearSpatialError(): void {
     if (state.spatialError) patch({ spatialError: null })
+  },
+  releaseImage(image: HTMLImageElement | null): void {
+    releaseRetainedImage(image)
   }
 }
 
@@ -219,7 +251,8 @@ async function loadCurrent(): Promise<void> {
   window.pic.setTitle(path ? fileName(path) : 'Pic')
 
   if (!path) {
-    revokeImage(state.currentImage)
+    retainPrevious(state.currentImage)
+    releaseRetained()
     patch({
       currentPath: null,
       currentImage: null,
@@ -245,25 +278,80 @@ async function loadCurrent(): Promise<void> {
       revokeImage(image)
       return
     }
-    revokeImage(state.currentImage)
+    if (staySpatial) {
+      const cached = await cachedDepth(path, image)
+      if (token !== loadToken) {
+        revokeImage(image)
+        return
+      }
+      if (cached) {
+        const focus = cached.suggestedFocus ?? { x: 0.5, y: 0.5 }
+        const canvas = await applyBokeh(image, cached, focus, state.blurAmount)
+        if (token !== loadToken) {
+          revokeImage(image)
+          return
+        }
+        retainPrevious(state.currentImage)
+        patch({
+          currentPath: path,
+          currentImage: image,
+          pixelSize: { width: image.naturalWidth, height: image.naturalHeight },
+          depthMap: cached,
+          bokehCanvas: canvas,
+          bokehRevision: state.bokehRevision + 1,
+          depthSourceLabel: depthSourceTitle.cache,
+          focusNormalized: focus,
+          spatialError: null,
+          isSpatialMode: true,
+          isPanoramaMode: false,
+          spatialInstant: true,
+          spatialBusy: false
+        })
+        return
+      }
+    }
+    retainPrevious(state.currentImage)
+    if (stayPanorama) {
+      const panels = detectTurnaroundPanels(image)
+      const controls = suggestedPanoControls({
+        width: image.naturalWidth,
+        height: image.naturalHeight
+      })
+      patch({
+        currentPath: path,
+        currentImage: image,
+        pixelSize: { width: image.naturalWidth, height: image.naturalHeight },
+        depthMap: null,
+        bokehCanvas: null,
+        depthSourceLabel: panels ? '角色转盘' : '720 全景',
+        spatialError: null,
+        spatialInstant: true,
+        isSpatialMode: true,
+        isPanoramaMode: true,
+        panoKind: panels ? 'turntable' : 'panorama',
+        panoPanels: panels ?? 0,
+        panoSpread: controls.spread,
+        panoBend: controls.bend,
+        spatialBusy: false
+      })
+      return
+    }
     patch({
       currentPath: path,
       currentImage: image,
       pixelSize: { width: image.naturalWidth, height: image.naturalHeight },
       depthMap: null,
       bokehCanvas: null,
-      bokehRevision: 0,
       depthSourceLabel: null,
-      spatialError: null
+      spatialError: null,
+      spatialInstant: false
     })
-    if (stayPanorama) {
-      enablePanorama()
-    } else if (staySpatial) {
+    if (staySpatial) {
       await enableSpatial()
     }
   } catch (error) {
     if (token !== loadToken) return
-    revokeImage(state.currentImage)
+    retainPrevious(state.currentImage)
     patch({
       currentPath: path,
       currentImage: null,
@@ -312,7 +400,27 @@ async function enableSpatial(): Promise<void> {
   const image = state.currentImage
   if (!path || !image) return
   const token = ++spatialToken
-  patch({ spatialBusy: true, spatialError: null, isPanoramaMode: false })
+  const cached = await cachedDepth(path, image)
+  if (token !== spatialToken) return
+  if (cached) {
+    const focus = cached.suggestedFocus ?? { x: 0.5, y: 0.5 }
+    const canvas = await applyBokeh(image, cached, focus, state.blurAmount)
+    if (token !== spatialToken) return
+    patch({
+      depthMap: cached,
+      bokehCanvas: canvas,
+      bokehRevision: state.bokehRevision + 1,
+      depthSourceLabel: depthSourceTitle.cache,
+      focusNormalized: focus,
+      isSpatialMode: true,
+      isPanoramaMode: false,
+      spatialBusy: false,
+      spatialError: null,
+      spatialInstant: true
+    })
+    return
+  }
+  patch({ spatialBusy: true, spatialError: null, isPanoramaMode: false, spatialInstant: false })
   await new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
   })
@@ -324,10 +432,15 @@ async function enableSpatial(): Promise<void> {
       depthMap: result.map,
       depthSourceLabel: depthSourceTitle[result.source],
       focusNormalized: focus,
-      isSpatialMode: true,
       isPanoramaMode: false
     })
     await recomputeBokeh(state.blurAmount, focus)
+    if (token !== spatialToken) return
+    patch({
+      isSpatialMode: true,
+      isPanoramaMode: false,
+      spatialInstant: false
+    })
   } catch (error) {
     if (token !== spatialToken) return
     patch({

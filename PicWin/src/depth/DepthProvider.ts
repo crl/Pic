@@ -20,31 +20,34 @@ export async function depthFor(
   path: string,
   image: HTMLImageElement
 ): Promise<{ map: DepthMap; source: DepthSource }> {
-  const cached = cache.get(path)
+  const cached = await cachedDepth(path, image)
   if (cached) {
     return { map: cached, source: 'cache' }
   }
 
-  const key = await diskKey(path, image)
-  if (key && window.pic.readDepthCache) {
-    try {
-      const stored = await window.pic.readDepthCache(key)
-      const map = stored ? decodeMap(stored) : null
-      if (map) {
-        remember(path, map)
-        return { map, source: 'cache' }
-      }
-    } catch {
-      // fall through to estimate
-    }
-  }
-
   const estimated = await estimateDepth(image)
   remember(path, estimated)
+  const key = await diskKey(path, image)
   if (key && window.pic.writeDepthCache) {
     void window.pic.writeDepthCache(key, encodeMap(estimated)).catch(() => undefined)
   }
   return { map: estimated, source: 'machineLearning' }
+}
+
+export async function cachedDepth(path: string, image: HTMLImageElement): Promise<DepthMap | null> {
+  const memory = cache.get(path)
+  if (memory) return memory
+  const key = await diskKey(path, image)
+  if (!key || !window.pic.readDepthCache) return null
+  try {
+    const stored = await window.pic.readDepthCache(key)
+    const map = stored ? decodeMap(stored) : null
+    if (!map) return null
+    remember(path, map)
+    return map
+  } catch {
+    return null
+  }
 }
 
 export function clearDepth(path?: string): void {
