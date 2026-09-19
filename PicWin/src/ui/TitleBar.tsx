@@ -33,12 +33,13 @@ export function TitleBar() {
   const spatialOn = store.isSpatialMode
 
   return (
-    <div className="titlebar-drag relative flex h-10 shrink-0 items-center bg-[#1c1c1c] text-[12px] text-white/90">
-      <div className="titlebar-no-drag z-10 min-w-0 max-w-[38%] truncate pl-3 text-[13px] font-medium tracking-wide">
+    <div className="relative flex h-10 shrink-0 items-center bg-[#1c1c1c] text-[12px] text-white/90">
+      <div className="absolute inset-0" data-tauri-drag-region />
+      <div className="relative z-10 min-w-0 max-w-[38%] truncate pl-3 text-[13px] font-medium tracking-wide">
         {title}
       </div>
 
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
         <div className="titlebar-no-drag pointer-events-auto flex overflow-hidden rounded border border-white/12">
           <ModeButton
             active={store.displayMode === 'fit'}
@@ -57,7 +58,7 @@ export function TitleBar() {
         </div>
       </div>
 
-      <div className="titlebar-no-drag z-10 ml-auto flex items-center pr-1">
+      <div className="relative z-10 ml-auto flex items-center pr-1">
         <IconButton
           label="3D 景深"
           disabled={!store.currentImage || store.spatialBusy}

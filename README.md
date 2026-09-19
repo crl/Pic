@@ -3,11 +3,11 @@
 本地看图应用，支持 **3D 景深视差** 和（Windows）**720° 全景**。
 
 - **macOS**：SwiftUI 原生应用
-- **Windows**：Electron 复刻（PicWin）
+- **Windows**：Tauri 2 + 系统 WebView2（PicWin）
 
 ## 下载
 
-**Windows x64**：[Pic-1.0.0-setup.exe](https://github.com/crl/Pic/releases/download/v1.0.0/Pic-1.0.0-setup.exe)
+**Windows x64**：[Pic_1.1.0_x64-setup.exe](https://github.com/crl/Pic/releases/download/v1.1.0/Pic_1.1.0_x64-setup.exe)（约 26MB）
 
 更多版本见 [Releases](https://github.com/crl/Pic/releases)。
 
@@ -23,6 +23,8 @@ macOS 目前请从源码编译。
 - 支持 JPG、PNG、GIF、WebP、HEIC、TIFF、BMP
 
 Windows 读不到 iPhone HEIC 里的内嵌人像深度，3D 一律用 Depth Anything V2 估算。macOS 会优先使用照片自带的深度图。
+
+需要 Windows 10/11 的 WebView2 Runtime（系统通常已安装）。
 
 ## 操作
 
@@ -40,15 +42,16 @@ Windows 读不到 iPhone HEIC 里的内嵌人像深度，3D 一律用 Depth Anyt
 
 ## Windows 从源码运行
 
+需要 [Rust](https://www.rust-lang.org/tools/install)。
+
 ```powershell
 cd PicWin
-$env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
-npm install --registry=https://registry.npmmirror.com
+npm install
 npm run fetch-model
 npm run dev
 ```
 
-`fetch-model` 会从 Hugging Face（失败则走 hf-mirror）下载 Depth Anything V2 Small ONNX 到 `PicWin/resources/models/`。没有模型时仍可看图，开启 3D 会提示找不到模型。
+`fetch-model` 会从 Hugging Face（失败则走 hf-mirror）下载 Depth Anything V2 Small ONNX 到 `PicWin/src-tauri/resources/models/`。没有模型时仍可看图，开启 3D 会提示找不到模型。
 
 打包安装包：
 
@@ -57,7 +60,7 @@ cd PicWin
 npm run dist
 ```
 
-产物在 `PicWin/release/Pic-1.0.0-setup.exe`。
+产物在 `PicWin/src-tauri/target/release/bundle/nsis/Pic_1.1.0_x64-setup.exe`（约 26MB）。
 
 ## macOS 从源码运行
 

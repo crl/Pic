@@ -8,5 +8,12 @@ PicWin/node_modules/
 PicWin/out/
 PicWin/dist/
 PicWin/release/
+PicWin/src-tauri/target/
+PicWin/src-tauri/gen/
+PicWin/src-tauri/resources/models/*.onnx
 PicWin/resources/models/*.onnx
 PicWin/public/models/*.onnx
+PicWin/public/ort/*
+!PicWin/public/ort/.gitkeep
+PicWin/public/models/*
+!PicWin/public/models/.gitkeep

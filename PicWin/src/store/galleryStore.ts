@@ -494,9 +494,8 @@ export function statusText(snapshot: GallerySnapshot): string {
 export const canGoPrevious = (snapshot: GallerySnapshot): boolean => snapshot.items.length > 1
 export const canGoNext = (snapshot: GallerySnapshot): boolean => snapshot.items.length > 1
 
-let ipcBound = false
-if (!ipcBound && typeof window !== 'undefined' && window.pic) {
-  ipcBound = true
+export function bindPicIpc(): void {
+  if (!window.pic) return
   window.pic.onOpenPath((path) => {
     void galleryStore.open(path)
   })

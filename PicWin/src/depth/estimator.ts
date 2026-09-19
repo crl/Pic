@@ -29,24 +29,16 @@ function tightBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
   return new Uint8Array(data.slice(0))
 }
 
-function modelUrl(): string {
-  return new URL(`${import.meta.env.BASE_URL}models/depth-anything-v2-small.onnx`, window.location.href).href
-}
-
 async function createSession() {
   try {
     const ort = await loadOrt()
     const open = async (): Promise<import('onnxruntime-web').InferenceSession> => {
-      try {
-        return await ort.InferenceSession.create(modelUrl(), { executionProviders: ['wasm'] })
-      } catch {
-        const modelPath = await window.pic.getModelPath()
-        if (!modelPath) throw new DepthError(depthErrors.modelMissing)
-        const buffer = await window.pic.readFile(modelPath)
-        const model = tightBytes(buffer)
-        if (model.byteLength < 1_000_000) throw new DepthError(depthErrors.modelMissing)
-        return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
-      }
+      const modelPath = await window.pic.getModelPath()
+      if (!modelPath) throw new DepthError(depthErrors.modelMissing)
+      const buffer = await window.pic.readFile(modelPath)
+      const model = tightBytes(buffer)
+      if (model.byteLength < 1_000_000) throw new DepthError(depthErrors.modelMissing)
+      return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
     }
     try {
       return await open()

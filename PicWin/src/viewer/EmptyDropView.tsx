@@ -11,7 +11,7 @@ export function EmptyDropView({ isTargeted, onOpen }: EmptyDropViewProps) {
       }`}
     >
       <div
-        className={`absolute inset-7 rounded-[18px] border-2 border-dashed ${
+        className={`pointer-events-none absolute inset-7 rounded-[18px] border-2 border-dashed ${
           isTargeted ? 'border-accent' : 'border-white/25'
         }`}
       />
@@ -26,7 +26,7 @@ export function EmptyDropView({ isTargeted, onOpen }: EmptyDropViewProps) {
       <button
         type="button"
         onClick={onOpen}
-        className="mt-2 rounded-md bg-white/12 px-5 py-2 text-sm hover:bg-white/18"
+        className="relative z-10 mt-2 rounded-md bg-white/12 px-5 py-2 text-sm hover:bg-white/18"
       >
         打开…
       </button>

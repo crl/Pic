@@ -7,7 +7,7 @@ import { Readable } from 'node:stream'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const destDir = join(root, 'resources', 'models')
-const publicDir = join(root, 'public', 'models')
+const tauriDir = join(root, 'src-tauri', 'resources', 'models')
 const dest = join(destDir, 'depth-anything-v2-small.onnx')
 
 const sources = [
@@ -34,7 +34,7 @@ const sources = [
 ]
 
 mkdirSync(destDir, { recursive: true })
-mkdirSync(publicDir, { recursive: true })
+mkdirSync(tauriDir, { recursive: true })
 
 function headerLooksLikeOnnx() {
   const bytes = readFileSync(dest).subarray(0, 64)
@@ -48,7 +48,7 @@ function looksValid(min, max) {
 }
 
 function publish() {
-  copyFileSync(dest, join(publicDir, 'depth-anything-v2-small.onnx'))
+  copyFileSync(dest, join(tauriDir, 'depth-anything-v2-small.onnx'))
   console.log(`saved ${dest} (${(statSync(dest).size / 1024 / 1024).toFixed(1)} MB)`)
 }
 

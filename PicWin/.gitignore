@@ -2,6 +2,10 @@ node_modules/
 out/
 dist/
 release/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/models/*.onnx
+!src-tauri/resources/models/.gitkeep
 resources/models/*.onnx
 resources/sample.png
 public/ort/*

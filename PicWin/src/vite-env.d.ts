@@ -1,4 +1,4 @@
-import type { PicApi } from '../electron/preload'
+import type { PicApi } from './bridge/pic'
 
 declare global {
   interface Window {

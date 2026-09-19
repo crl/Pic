@@ -1,19 +1,24 @@
 {
   "name": "picwin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Pic for Windows — 看图应用，支持 3D 景深视差",
-  "main": "./out/main/index.js",
+  "private": true,
   "author": "crl",
   "license": "UNLICENSED",
+  "type": "module",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
+    "dev": "tauri dev",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "build": "tauri build",
     "fetch-model": "node scripts/fetch-model.mjs",
+    "copy-wasm": "node scripts/copy-ort-wasm.mjs",
     "postinstall": "node scripts/copy-ort-wasm.mjs && node scripts/fetch-model.mjs",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "tauri build",
+    "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.8.0",
     "heic-decode": "^2.1.0",
     "onnxruntime-web": "^1.21.0",
     "react": "^19.1.0",
@@ -21,71 +26,15 @@
     "three": "^0.176.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.8.0",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@types/three": "^0.176.0",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
-    "electron": "^35.2.0",
-    "electron-builder": "^26.0.12",
-    "electron-vite": "^3.1.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "vite": "^6.3.4"
-  },
-  "build": {
-    "appId": "com.crl.picwin",
-    "productName": "Pic",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "out/**",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/models",
-        "to": "models",
-        "filter": [
-          "**/*.onnx"
-        ]
-      }
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "${productName}-${version}-setup.${ext}"
-    },
-    "fileAssociations": [
-      {
-        "ext": [
-          "jpg",
-          "jpeg",
-          "png",
-          "gif",
-          "webp",
-          "heic",
-          "heif",
-          "tif",
-          "tiff",
-          "bmp"
-        ],
-        "name": "Image",
-        "role": "Viewer",
-        "rank": "Alternate"
-      }
-    ],
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
-    }
   }
 }
