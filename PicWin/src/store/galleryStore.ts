@@ -4,6 +4,7 @@ import { DepthMap } from '../depth/DepthMap'
 import { depthFor } from '../depth/DepthProvider'
 import { depthSourceTitle } from '../depth/DepthMap'
 import { decodeImageFile, fileName, samePath } from './decodeImage'
+import { suggestedPanoControls } from '../depth/panorama'
 import { DisplayMode, Point, Size } from './types'
 
 export interface GallerySnapshot {
@@ -15,6 +16,7 @@ export interface GallerySnapshot {
   displayMode: DisplayMode
   isDropTargeted: boolean
   isSpatialMode: boolean
+  isPanoramaMode: boolean
   spatialBusy: boolean
   spatialError: string | null
   blurAmount: number
@@ -24,6 +26,8 @@ export interface GallerySnapshot {
   bokehCanvas: HTMLCanvasElement | null
   bokehRevision: number
   depthSourceLabel: string | null
+  panoSpread: number
+  panoBend: number
 }
 
 const listeners = new Set<() => void>()
@@ -37,6 +41,7 @@ const state: GallerySnapshot = {
   displayMode: 'fit',
   isDropTargeted: false,
   isSpatialMode: false,
+  isPanoramaMode: false,
   spatialBusy: false,
   spatialError: null,
   blurAmount: 0.45,
@@ -45,7 +50,9 @@ const state: GallerySnapshot = {
   depthMap: null,
   bokehCanvas: null,
   bokehRevision: 0,
-  depthSourceLabel: null
+  depthSourceLabel: null,
+  panoSpread: 0.5,
+  panoBend: 0.38
 }
 
 let snapshot: GallerySnapshot = { ...state }
@@ -156,11 +163,22 @@ export const galleryStore = {
     void loadCurrent()
   },
   async toggleSpatial(): Promise<void> {
+    if (state.isPanoramaMode) {
+      await enableSpatial()
+      return
+    }
     if (state.isSpatialMode) {
-      patch({ isSpatialMode: false, spatialError: null })
+      patch({ isSpatialMode: false, isPanoramaMode: false, spatialError: null })
       return
     }
     await enableSpatial()
+  },
+  togglePanorama(): void {
+    if (state.isPanoramaMode) {
+      patch({ isSpatialMode: false, isPanoramaMode: false, spatialError: null })
+      return
+    }
+    enablePanorama()
   },
   setFocus(normalized: Point): void {
     patch({
@@ -177,6 +195,12 @@ export const galleryStore = {
   },
   setParallaxAmount(value: number): void {
     patch({ parallaxAmount: Math.min(Math.max(value, 0), 1) })
+  },
+  setPanoSpread(value: number): void {
+    patch({ panoSpread: Math.min(Math.max(value, 0), 1) })
+  },
+  setPanoBend(value: number): void {
+    patch({ panoBend: Math.min(Math.max(value, 0), 1) })
   },
   clearSpatialError(): void {
     if (state.spatialError) patch({ spatialError: null })
@@ -201,12 +225,14 @@ async function loadCurrent(): Promise<void> {
       bokehRevision: 0,
       depthSourceLabel: null,
       isSpatialMode: false,
+      isPanoramaMode: false,
       spatialError: null
     })
     return
   }
 
-  const staySpatial = state.isSpatialMode
+  const stayPanorama = state.isPanoramaMode
+  const staySpatial = state.isSpatialMode && !state.isPanoramaMode
   try {
     const bytes = await window.pic.readFile(path)
     if (token !== loadToken) return
@@ -226,7 +252,9 @@ async function loadCurrent(): Promise<void> {
       depthSourceLabel: null,
       spatialError: null
     })
-    if (staySpatial) {
+    if (stayPanorama) {
+      enablePanorama()
+    } else if (staySpatial) {
       await enableSpatial()
     }
   } catch (error) {
@@ -241,12 +269,29 @@ async function loadCurrent(): Promise<void> {
   }
 }
 
+function enablePanorama(): void {
+  if (!state.currentImage) return
+  spatialToken += 1
+  const controls = suggestedPanoControls(state.pixelSize)
+  patch({
+    isSpatialMode: true,
+    isPanoramaMode: true,
+    spatialBusy: false,
+    spatialError: null,
+    depthMap: null,
+    bokehCanvas: null,
+    depthSourceLabel: '720 全景',
+    panoSpread: controls.spread,
+    panoBend: controls.bend
+  })
+}
+
 async function enableSpatial(): Promise<void> {
   const path = state.currentPath
   const image = state.currentImage
   if (!path || !image) return
   const token = ++spatialToken
-  patch({ spatialBusy: true, spatialError: null })
+  patch({ spatialBusy: true, spatialError: null, isPanoramaMode: false })
   try {
     const result = await depthFor(path, image)
     if (token !== spatialToken) return
@@ -255,13 +300,15 @@ async function enableSpatial(): Promise<void> {
       depthMap: result.map,
       depthSourceLabel: depthSourceTitle[result.source],
       focusNormalized: focus,
-      isSpatialMode: true
+      isSpatialMode: true,
+      isPanoramaMode: false
     })
     await recomputeBokeh(state.blurAmount, focus)
   } catch (error) {
     if (token !== spatialToken) return
     patch({
       isSpatialMode: false,
+      isPanoramaMode: false,
       spatialError: error instanceof Error ? error.message : '无法计算景深'
     })
   } finally {

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SpatialPhotoView } from '../depth/SpatialPhotoView'
+import { PanoramaView } from '../depth/PanoramaView'
 import { galleryStore, statusText, useGallery, canGoNext, canGoPrevious } from '../store/galleryStore'
+import { spreadToHaov } from '../depth/panorama'
 import { Size } from '../store/types'
 import { EmptyDropView } from '../viewer/EmptyDropView'
 import { DouyinBottomFrost, DouyinLetterbox, ImageCanvas, aspectFitSize } from '../viewer/ImageCanvas'
@@ -141,14 +143,15 @@ function Viewer() {
   }, [store.isSpatialMode])
 
   useEffect(() => {
-    if (!store.depthMap) {
+    const pano = store.isPanoramaMode
+    if (!store.depthMap && !pano) {
       setSpatialOpacity(0)
       return
     }
     if (!store.isSpatialMode) return
     setKeepSpatialLayer(true)
     window.setTimeout(() => revealSpatial(), 160)
-  }, [store.depthMap])
+  }, [store.depthMap, store.isPanoramaMode])
 
   const revealSpatial = (): void => {
     if (!galleryStore.getSnapshot().isSpatialMode) return
@@ -160,14 +163,28 @@ function Viewer() {
     setTilt(value)
   }
 
-  const spatialCovering = keepSpatialLayer && store.depthMap != null
+  const isPano = store.isPanoramaMode
+  const spatialCovering = keepSpatialLayer && (store.depthMap != null || isPano)
   const twoDOpacity = spatialCovering ? 1 - spatialOpacity : 1
   const original = store.currentImage
 
   return (
     <div className="relative h-full">
       <div className="absolute inset-0">
-        {keepSpatialLayer && store.depthMap && original ? (
+        {keepSpatialLayer && original && isPano ? (
+          <div
+            className="absolute inset-0"
+            style={{ pointerEvents: store.isSpatialMode ? 'auto' : 'none' }}
+          >
+            <PanoramaView
+              image={original}
+              spread={store.panoSpread}
+              bend={store.panoBend}
+              onFirstFrame={revealSpatial}
+            />
+          </div>
+        ) : null}
+        {keepSpatialLayer && store.depthMap && original && !isPano ? (
           <SpatialLayer
             depthReady
             original={original}
@@ -369,7 +386,38 @@ function OverlayChrome() {
               <span className="shrink-0">{store.depthSourceLabel}</span>
             </>
           ) : null}
-          {store.isSpatialMode ? (
+          {store.isSpatialMode && store.isPanoramaMode ? (
+            <>
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
+                <span className="shrink-0">张角</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={store.panoSpread}
+                  onChange={(event) => galleryStore.setPanoSpread(Number(event.target.value))}
+                  className="h-1 min-w-[72px] max-w-[180px] flex-1 accent-[#6bc7fa]"
+                />
+                <span className="w-10 shrink-0 text-right font-mono">
+                  {Math.round((spreadToHaov(store.panoSpread) * 180) / Math.PI)}°
+                </span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
+                <span className="shrink-0">弯曲</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={store.panoBend}
+                  onChange={(event) => galleryStore.setPanoBend(Number(event.target.value))}
+                  className="h-1 min-w-[72px] max-w-[180px] flex-1 accent-[#6bc7fa]"
+                />
+                <span className="w-10 shrink-0 text-right font-mono">{Math.round(store.panoBend * 100)}%</span>
+              </div>
+            </>
+          ) : store.isSpatialMode && !store.isPanoramaMode ? (
             <>
               <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
                 <span className="shrink-0">虚化</span>
@@ -401,7 +449,11 @@ function OverlayChrome() {
           ) : (
             <span className="flex-1" />
           )}
-          {store.isSpatialMode ? <span className="shrink-0">移动鼠标看立体 · 点击对焦</span> : null}
+          {store.isSpatialMode ? (
+            <span className="shrink-0">
+              {store.isPanoramaMode ? '拖动环视 · 滚轮缩放' : '移动鼠标看立体 · 点击对焦'}
+            </span>
+          ) : null}
         </div>
       </div>
     </div>

@@ -66,8 +66,15 @@ export function TitleBar() {
           {store.spatialBusy ? (
             <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/30 border-t-white" />
           ) : (
-            <CubeIcon active={spatialOn} />
+            <CubeIcon active={spatialOn && !store.isPanoramaMode} />
           )}
+        </IconButton>
+        <IconButton
+          label="720° 球面全景"
+          disabled={!store.currentImage}
+          onClick={() => galleryStore.togglePanorama()}
+        >
+          <GlobeIcon active={store.isPanoramaMode} />
         </IconButton>
         <WindowButton label="最小化" onClick={() => window.pic.windowControl('min')}>
           <svg width="10" height="10" viewBox="0 0 10 10">
@@ -136,6 +143,24 @@ function WindowButton({
     >
       {children}
     </button>
+  )
+}
+
+function GlobeIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" className={active ? 'text-accent' : 'text-white'}>
+      <circle
+        cx="8"
+        cy="8"
+        r="6"
+        fill="currentColor"
+        fillOpacity="0.18"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <ellipse cx="8" cy="8" rx="2.5" ry="6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M2 8h12M3.4 4.7h9.2M3.4 11.3h9.2" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
   )
 }
 
