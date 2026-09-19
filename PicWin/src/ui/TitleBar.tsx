@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { galleryStore, useGallery, canGoNext, canGoPrevious } from '../store/galleryStore'
+import { galleryStore, useGallery } from '../store/galleryStore'
 import { fileName } from '../store/decodeImage'
 
 function IconButton({
@@ -33,15 +33,13 @@ export function TitleBar() {
   const spatialOn = store.isSpatialMode
 
   return (
-    <div className="titlebar-drag flex h-10 shrink-0 items-center bg-[#1c1c1c] text-[12px] text-white/90">
-      <div className="titlebar-no-drag flex items-center gap-1 pl-2">
-        <IconButton label="上一张" disabled={!canGoPrevious(store)} onClick={() => galleryStore.previous()}>
-          <ChevronLeft />
-        </IconButton>
-        <IconButton label="下一张" disabled={!canGoNext(store)} onClick={() => galleryStore.next()}>
-          <ChevronRight />
-        </IconButton>
-        <div className="mx-1 flex overflow-hidden rounded border border-white/12">
+    <div className="titlebar-drag relative flex h-10 shrink-0 items-center bg-[#1c1c1c] text-[12px] text-white/90">
+      <div className="titlebar-no-drag z-10 min-w-0 max-w-[38%] truncate pl-3 text-[13px] font-medium tracking-wide">
+        {title}
+      </div>
+
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="titlebar-no-drag pointer-events-auto flex overflow-hidden rounded border border-white/12">
           <ModeButton
             active={store.displayMode === 'fit'}
             disabled={!store.currentImage || spatialOn}
@@ -59,9 +57,7 @@ export function TitleBar() {
         </div>
       </div>
 
-      <div className="min-w-0 flex-1 px-3 text-center text-[13px] font-medium tracking-wide">{title}</div>
-
-      <div className="titlebar-no-drag flex items-center pr-1">
+      <div className="titlebar-no-drag z-10 ml-auto flex items-center pr-1">
         <IconButton
           label="3D 景深"
           disabled={!store.currentImage || store.spatialBusy}
@@ -140,22 +136,6 @@ function WindowButton({
     >
       {children}
     </button>
-  )
-}
-
-function ChevronLeft() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <path d="M7.5 2.5 3.5 6l4 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  )
-}
-
-function ChevronRight() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-      <path d="M4.5 2.5 8.5 6l-4 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
   )
 }
 

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SpatialPhotoView } from '../depth/SpatialPhotoView'
-import { galleryStore, statusText, useGallery } from '../store/galleryStore'
+import { galleryStore, statusText, useGallery, canGoNext, canGoPrevious } from '../store/galleryStore'
 import { Size } from '../store/types'
 import { EmptyDropView } from '../viewer/EmptyDropView'
 import { DouyinBottomFrost, DouyinLetterbox, ImageCanvas, aspectFitSize } from '../viewer/ImageCanvas'
@@ -57,6 +57,7 @@ export function App() {
         ) : (
           <EmptyDropView isTargeted={store.isDropTargeted} onOpen={() => void galleryStore.presentOpenPanel()} />
         )}
+        <EdgeNav />
         {store.spatialError ? (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50">
             <div className="w-[360px] rounded-lg bg-[#2b2b2b] p-5 shadow-xl">
@@ -276,12 +277,76 @@ function SpatialLayer({
             textureRevision={store.bokehRevision}
             depthMap={store.depthMap}
             imageSize={store.pixelSize}
+            focus={store.focusNormalized}
+            strength={store.parallaxAmount}
             tilt={tilt}
             tiltSettling={tiltSettling}
             onFirstFrame={onFirstFrame}
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+function EdgeNav() {
+  const store = useGallery()
+  if (!store.currentImage) return null
+  return (
+    <>
+      <EdgeButton
+        side="left"
+        label="上一张"
+        disabled={!canGoPrevious(store)}
+        onClick={() => galleryStore.previous()}
+      >
+        <path d="M7.5 2.5 3.5 6l4 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </EdgeButton>
+      <EdgeButton
+        side="right"
+        label="下一张"
+        disabled={!canGoNext(store)}
+        onClick={() => galleryStore.next()}
+      >
+        <path d="M4.5 2.5 8.5 6l-4 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </EdgeButton>
+    </>
+  )
+}
+
+function EdgeButton({
+  side,
+  label,
+  disabled,
+  onClick,
+  children
+}: {
+  side: 'left' | 'right'
+  label: string
+  disabled: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`group absolute inset-y-0 z-20 flex w-[72px] items-center ${
+        side === 'left' ? 'left-0 justify-start pl-3' : 'right-0 justify-end pr-3'
+      }`}
+    >
+      <button
+        type="button"
+        title={label}
+        aria-label={label}
+        disabled={disabled}
+        onClick={onClick}
+        className={`flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-black/40 text-white/90 shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur-md transition duration-200 hover:scale-105 hover:border-white/25 hover:bg-white/15 hover:text-white disabled:pointer-events-none ${
+          side === 'left' ? '-translate-x-1' : 'translate-x-1'
+        } opacity-0 group-hover:translate-x-0 group-hover:enabled:opacity-100`}
+      >
+        <svg width="16" height="16" viewBox="0 0 12 12" fill="none">
+          {children}
+        </svg>
+      </button>
     </div>
   )
 }
@@ -296,31 +361,47 @@ function OverlayChrome() {
         }`}
         style={{ transition: 'background 320ms ease-in-out' }}
       >
-        {store.isSpatialMode ? (
-          <div className="mb-2.5 flex items-center gap-2.5 text-white">
-            <span className="text-[12px]">虚化</span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={store.blurAmount}
-              onChange={(event) => galleryStore.setBlurAmount(Number(event.target.value))}
-              className="h-1 max-w-[240px] flex-1 accent-[#6bc7fa]"
-            />
-            <span className="w-10 text-right font-mono text-[12px]">{Math.round(store.blurAmount * 100)}%</span>
-          </div>
-        ) : null}
-        <div className="flex items-center text-[12px] text-white/78">
-          <span>{statusText(store)}</span>
+        <div className="flex items-center gap-3 text-[12px] text-white/78">
+          <span className="shrink-0">{statusText(store)}</span>
           {store.depthSourceLabel && store.isSpatialMode ? (
             <>
-              <span className="px-1.5">·</span>
-              <span>{store.depthSourceLabel}</span>
+              <span className="shrink-0">·</span>
+              <span className="shrink-0">{store.depthSourceLabel}</span>
             </>
           ) : null}
-          <span className="flex-1" />
-          {store.isSpatialMode ? <span>移动鼠标看立体 · 点击对焦</span> : null}
+          {store.isSpatialMode ? (
+            <>
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
+                <span className="shrink-0">虚化</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={store.blurAmount}
+                  onChange={(event) => galleryStore.setBlurAmount(Number(event.target.value))}
+                  className="h-1 min-w-[72px] max-w-[180px] flex-1 accent-[#6bc7fa]"
+                />
+                <span className="w-10 shrink-0 text-right font-mono">{Math.round(store.blurAmount * 100)}%</span>
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
+                <span className="shrink-0">景深</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={store.parallaxAmount}
+                  onChange={(event) => galleryStore.setParallaxAmount(Number(event.target.value))}
+                  className="h-1 min-w-[72px] max-w-[180px] flex-1 accent-[#6bc7fa]"
+                />
+                <span className="w-10 shrink-0 text-right font-mono">{Math.round(store.parallaxAmount * 100)}%</span>
+              </div>
+            </>
+          ) : (
+            <span className="flex-1" />
+          )}
+          {store.isSpatialMode ? <span className="shrink-0">移动鼠标看立体 · 点击对焦</span> : null}
         </div>
       </div>
     </div>

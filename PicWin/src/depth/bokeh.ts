@@ -33,40 +33,37 @@ void main() {
   gl_Position = vec4(p, 0.0, 1.0);
 }`
 
-const BLUR_FS = `#version 300 es
+const VAR_BLUR_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform sampler2D uTex;
-uniform vec2 uDirection;
-uniform float uRadius;
-void main() {
-  vec2 texel = uDirection / vec2(textureSize(uTex, 0));
-  vec4 acc = texture(uTex, vUv) * 0.227027;
-  acc += texture(uTex, vUv + texel * 1.384615 * uRadius) * 0.316216;
-  acc += texture(uTex, vUv - texel * 1.384615 * uRadius) * 0.316216;
-  acc += texture(uTex, vUv + texel * 3.230769 * uRadius) * 0.070270;
-  acc += texture(uTex, vUv - texel * 3.230769 * uRadius) * 0.070270;
-  fragColor = acc;
-}`
-
-const MIX_FS = `#version 300 es
-precision highp float;
-in vec2 vUv;
-out vec4 fragColor;
-uniform sampler2D uSharp;
-uniform sampler2D uMid;
-uniform sampler2D uFull;
 uniform sampler2D uMask;
+uniform vec2 uDirection;
+uniform float uMaxRadius;
 void main() {
-  float m = texture(uMask, vUv).r;
-  vec3 sharp = texture(uSharp, vUv).rgb;
-  vec3 mid = texture(uMid, vUv).rgb;
-  vec3 full = texture(uFull, vUv).rgb;
-  vec3 color = m < 0.5
-    ? mix(sharp, mid, m * 2.0)
-    : mix(mid, full, (m - 0.5) * 2.0);
-  fragColor = vec4(color, 1.0);
+  float coverage = texture(uMask, vUv).r;
+  float radius = coverage * uMaxRadius;
+  vec4 center = texture(uTex, vUv);
+  if (radius < 0.35) {
+    fragColor = center;
+    return;
+  }
+  vec2 texel = uDirection / vec2(textureSize(uTex, 0));
+  float sigma = max(radius * 0.38, 0.45);
+  float twoSigma2 = 2.0 * sigma * sigma;
+  vec4 acc = center;
+  float wsum = 1.0;
+  const int TAPS = 8;
+  for (int i = 1; i <= TAPS; i++) {
+    float x = float(i);
+    float w = exp(-(x * x) / twoSigma2);
+    vec2 off = texel * (x / float(TAPS)) * radius;
+    acc += texture(uTex, vUv + off) * w;
+    acc += texture(uTex, vUv - off) * w;
+    wsum += 2.0 * w;
+  }
+  fragColor = acc / wsum;
 }`
 
 function createTexture(gl: WebGL2RenderingContext): WebGLTexture {
@@ -167,67 +164,42 @@ export async function applyBokeh(
   const ping = createTexture(gl)
   gl.bindTexture(gl.TEXTURE_2D, ping)
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, working.width, working.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
-  const pong = createTexture(gl)
-  gl.bindTexture(gl.TEXTURE_2D, pong)
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, working.width, working.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
-  const midTex = createTexture(gl)
-  gl.bindTexture(gl.TEXTURE_2D, midTex)
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, working.width, working.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
-  const fullTex = createTexture(gl)
-  gl.bindTexture(gl.TEXTURE_2D, fullTex)
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, working.width, working.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null)
-
   const pingFbo = createFbo(gl, ping)
-  const pongFbo = createFbo(gl, pong)
-  const midFbo = createFbo(gl, midTex)
-  const fullFbo = createFbo(gl, fullTex)
 
-  const blurProg = program(gl, QUAD_VS, BLUR_FS)
-  const mixProg = program(gl, QUAD_VS, MIX_FS)
+  const blurProg = program(gl, QUAD_VS, VAR_BLUR_FS)
   const uDir = gl.getUniformLocation(blurProg, 'uDirection')
-  const uRadius = gl.getUniformLocation(blurProg, 'uRadius')
+  const uMaxRadius = gl.getUniformLocation(blurProg, 'uMaxRadius')
   const uTex = gl.getUniformLocation(blurProg, 'uTex')
+  const uMask = gl.getUniformLocation(blurProg, 'uMask')
 
-  const runBlur = (source: WebGLTexture, radius: number, target: WebGLFramebuffer): void => {
-    gl.useProgram(blurProg)
-    gl.viewport(0, 0, working.width, working.height)
-    gl.uniform1i(uTex, 0)
-    gl.activeTexture(gl.TEXTURE0)
-    gl.bindTexture(gl.TEXTURE_2D, source)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, pingFbo)
-    gl.uniform2f(uDir, 1, 0)
-    gl.uniform1f(uRadius, radius)
-    gl.drawArrays(gl.TRIANGLES, 0, 3)
-    gl.bindTexture(gl.TEXTURE_2D, ping)
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target)
-    gl.uniform2f(uDir, 0, 1)
-    gl.drawArrays(gl.TRIANGLES, 0, 3)
-  }
+  gl.useProgram(blurProg)
+  gl.viewport(0, 0, working.width, working.height)
+  gl.uniform1i(uTex, 0)
+  gl.uniform1i(uMask, 1)
+  gl.uniform1f(uMaxRadius, Math.max(scaledRadius, 1))
+  gl.activeTexture(gl.TEXTURE1)
+  gl.bindTexture(gl.TEXTURE_2D, maskTex)
 
-  runBlur(sharpTex, Math.max(scaledRadius * 0.4, 0.5), midFbo)
-  runBlur(sharpTex, Math.max(scaledRadius, 1), fullFbo)
-
-  gl.bindFramebuffer(gl.FRAMEBUFFER, pongFbo)
-  gl.useProgram(mixProg)
-  gl.uniform1i(gl.getUniformLocation(mixProg, 'uSharp'), 0)
-  gl.uniform1i(gl.getUniformLocation(mixProg, 'uMid'), 1)
-  gl.uniform1i(gl.getUniformLocation(mixProg, 'uFull'), 2)
-  gl.uniform1i(gl.getUniformLocation(mixProg, 'uMask'), 3)
+  gl.bindFramebuffer(gl.FRAMEBUFFER, pingFbo)
   gl.activeTexture(gl.TEXTURE0)
   gl.bindTexture(gl.TEXTURE_2D, sharpTex)
-  gl.activeTexture(gl.TEXTURE1)
-  gl.bindTexture(gl.TEXTURE_2D, midTex)
-  gl.activeTexture(gl.TEXTURE2)
-  gl.bindTexture(gl.TEXTURE_2D, fullTex)
-  gl.activeTexture(gl.TEXTURE3)
-  gl.bindTexture(gl.TEXTURE_2D, maskTex)
+  gl.uniform2f(uDir, 1, 0)
+  gl.drawArrays(gl.TRIANGLES, 0, 3)
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+  gl.clearColor(0, 0, 0, 1)
+  gl.clear(gl.COLOR_BUFFER_BIT)
+  gl.activeTexture(gl.TEXTURE0)
+  gl.bindTexture(gl.TEXTURE_2D, ping)
+  gl.uniform2f(uDir, 0, 1)
   gl.drawArrays(gl.TRIANGLES, 0, 3)
 
   outCtx.drawImage(canvas, 0, 0, out.width, out.height)
 
   gl.deleteProgram(blurProg)
-  gl.deleteProgram(mixProg)
-  for (const tex of [sharpTex, maskTex, ping, pong, midTex, fullTex]) gl.deleteTexture(tex)
-  for (const fbo of [pingFbo, pongFbo, midFbo, fullFbo]) gl.deleteFramebuffer(fbo)
+  gl.deleteTexture(sharpTex)
+  gl.deleteTexture(maskTex)
+  gl.deleteTexture(ping)
+  gl.deleteFramebuffer(pingFbo)
   return out
 }

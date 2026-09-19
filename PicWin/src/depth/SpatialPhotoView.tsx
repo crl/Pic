@@ -7,23 +7,103 @@ interface SpatialPhotoViewProps {
   textureRevision: number
   depthMap: DepthMap
   imageSize: { width: number; height: number }
+  focus: { x: number; y: number }
+  strength: number
   tilt: { width: number; height: number }
   tiltSettling: boolean
   onFirstFrame?: () => void
 }
 
-function cameraTransform(tilt: { width: number; height: number }): THREE.Vector3 {
-  return new THREE.Vector3(tilt.width * 0.28, -tilt.height * 0.28, 3.15)
+function cameraTransform(tilt: { width: number; height: number }, strength: number): THREE.Vector3 {
+  const amount = Math.min(Math.max(strength, 0), 1)
+  const offset = 0.16 + amount * 0.44
+  return new THREE.Vector3(tilt.width * offset, -tilt.height * offset, 3.2 - amount * 0.6)
 }
 
-function makeGeometry(depth: DepthMap, imageSize: { width: number; height: number }): THREE.BufferGeometry {
+function sampleGrid(depth: DepthMap, cols: number, rows: number): Float32Array {
+  const width = cols + 1
+  const height = rows + 1
+  const raw = new Float32Array(width * height)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      raw[row * width + col] = depth.sample(col / cols, 1 - row / rows)
+    }
+  }
+  const smooth = new Float32Array(width * height)
+  for (let row = 0; row < height; row++) {
+    for (let col = 0; col < width; col++) {
+      let acc = 0
+      let count = 0
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const y = row + dy
+          const x = col + dx
+          if (x < 0 || y < 0 || x >= width || y >= height) continue
+          acc += raw[y * width + x]!
+          count++
+        }
+      }
+      smooth[row * width + col] = acc / Math.max(count, 1)
+    }
+  }
+  return smooth
+}
+
+function relativeZ(depth: number, focusDepth: number, maxDisplace: number): number {
+  const delta = depth - focusDepth
+  const mag = Math.pow(Math.abs(delta), 0.75)
+  return Math.sign(delta) * mag * maxDisplace
+}
+
+function clampGradients(values: Float32Array, width: number, height: number, maxStep: number): void {
+  for (let pass = 0; pass < 2; pass++) {
+    for (let row = 0; row < height; row++) {
+      for (let col = 0; col < width; col++) {
+        const i = row * width + col
+        const current = values[i]!
+        let next = current
+        if (col > 0) {
+          const left = values[i - 1]!
+          if (Math.abs(current - left) > maxStep) {
+            next = left + Math.sign(current - left) * maxStep
+          }
+        }
+        if (row > 0) {
+          const up = values[i - width]!
+          if (Math.abs(next - up) > maxStep) {
+            next = up + Math.sign(next - up) * maxStep
+          }
+        }
+        values[i] = next
+      }
+    }
+  }
+}
+
+function makeGeometry(
+  depth: DepthMap,
+  imageSize: { width: number; height: number },
+  focus: { x: number; y: number },
+  strength: number
+): THREE.BufferGeometry {
   const cols = 140
   const rows = 100
   const aspect = Math.max(imageSize.width, 1) / Math.max(imageSize.height, 1)
   const planeWidth = aspect >= 1 ? 2.0 : 2.0 * aspect
   const planeHeight = aspect >= 1 ? 2.0 / aspect : 2.0
-  const maxDisplace = 0.16
-  const vertexCount = (cols + 1) * (rows + 1)
+  const amount = Math.min(Math.max(strength, 0), 1)
+  const maxDisplace = amount * 0.4
+  const width = cols + 1
+  const height = rows + 1
+  const sampled = sampleGrid(depth, cols, rows)
+  const focusDepth = depth.sample(focus.x, focus.y)
+  const zs = new Float32Array(width * height)
+  for (let i = 0; i < sampled.length; i++) {
+    zs[i] = relativeZ(sampled[i]!, focusDepth, maxDisplace)
+  }
+  clampGradients(zs, width, height, Math.max(0.018, maxDisplace * 0.14))
+
+  const vertexCount = width * height
   const positions = new Float32Array(vertexCount * 3)
   const uvs = new Float32Array(vertexCount * 2)
   let i = 0
@@ -33,7 +113,7 @@ function makeGeometry(depth: DepthMap, imageSize: { width: number; height: numbe
       const v = row / rows
       positions[i * 3] = (u - 0.5) * planeWidth
       positions[i * 3 + 1] = (v - 0.5) * planeHeight
-      positions[i * 3 + 2] = depth.sample(u, 1 - v) * maxDisplace
+      positions[i * 3 + 2] = zs[row * width + col]!
       uvs[i * 2] = u
       uvs[i * 2 + 1] = v
       i++
@@ -75,6 +155,8 @@ export function SpatialPhotoView({
   textureRevision,
   depthMap,
   imageSize,
+  focus,
+  strength,
   tilt,
   tiltSettling,
   onFirstFrame
@@ -83,9 +165,11 @@ export function SpatialPhotoView({
   const engineRef = useRef<Engine | null>(null)
   const tiltRef = useRef(tilt)
   const settlingRef = useRef(tiltSettling)
+  const strengthRef = useRef(strength)
   const onFirstFrameRef = useRef(onFirstFrame)
   tiltRef.current = tilt
   settlingRef.current = tiltSettling
+  strengthRef.current = strength
   onFirstFrameRef.current = onFirstFrame
 
   useEffect(() => {
@@ -122,10 +206,10 @@ export function SpatialPhotoView({
     engineRef.current = engine
 
     const applyCamera = (value: { width: number; height: number }): void => {
-      const pos = cameraTransform(value)
+      const pos = cameraTransform(value, strengthRef.current)
       camera.position.copy(pos)
       camera.up.set(0, 1, 0)
-      camera.lookAt(0, 0, 0.05)
+      camera.lookAt(0, 0, 0)
     }
     applyCamera(engine.currentTilt)
 
@@ -183,9 +267,9 @@ export function SpatialPhotoView({
     const engine = engineRef.current
     if (!engine) return
     engine.photo.geometry.dispose()
-    engine.photo.geometry = makeGeometry(depthMap, imageSize)
+    engine.photo.geometry = makeGeometry(depthMap, imageSize, focus, strength)
     engine.didReport = false
-  }, [depthMap, imageSize.width, imageSize.height])
+  }, [depthMap, imageSize.width, imageSize.height, focus.x, focus.y, strength])
 
   useEffect(() => {
     const engine = engineRef.current

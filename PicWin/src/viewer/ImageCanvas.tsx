@@ -98,18 +98,35 @@ function ActualImage({
   pixelSize: Size
   showBackdrop: boolean
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
   const width = Math.max(pixelSize.width, 1)
   const height = Math.max(pixelSize.height, 1)
+
+  useEffect(() => {
+    const node = scrollerRef.current
+    if (!node) return
+    const onWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      node.scrollLeft += event.deltaY !== 0 ? event.deltaY : event.deltaX
+    }
+    node.addEventListener('wheel', onWheel, { passive: false })
+    return () => node.removeEventListener('wheel', onWheel)
+  }, [])
+
   return (
-    <div className="h-full w-full overflow-auto">
-      <div className="flex min-h-full min-w-full items-center justify-center">
-        <div className="relative" style={{ width, height }}>
+    <div ref={scrollerRef} className="h-full w-full overflow-auto">
+      <div
+        className="flex items-center justify-center"
+        style={{ minWidth: '100%', minHeight: '100%', width, height }}
+      >
+        <div className="relative shrink-0" style={{ width, height }}>
           {showBackdrop ? <Checkerboard width={width} height={height} /> : null}
           <img
             src={image.src}
             alt=""
             draggable={false}
-            className="absolute inset-0"
+            className="relative z-[1] block max-w-none"
             style={{ width, height, imageRendering: 'pixelated' }}
           />
         </div>

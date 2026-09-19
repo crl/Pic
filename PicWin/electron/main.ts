@@ -159,6 +159,7 @@ function createWindow(): void {
   mainWindow.webContents.on('preload-error', (_event, _path, error) => {
     console.error('preload-error', error)
   })
+  void mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()

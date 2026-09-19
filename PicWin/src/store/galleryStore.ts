@@ -18,6 +18,7 @@ export interface GallerySnapshot {
   spatialBusy: boolean
   spatialError: string | null
   blurAmount: number
+  parallaxAmount: number
   focusNormalized: Point
   depthMap: DepthMap | null
   bokehCanvas: HTMLCanvasElement | null
@@ -39,6 +40,7 @@ const state: GallerySnapshot = {
   spatialBusy: false,
   spatialError: null,
   blurAmount: 0.45,
+  parallaxAmount: 0.7,
   focusNormalized: { x: 0.5, y: 0.5 },
   depthMap: null,
   bokehCanvas: null,
@@ -173,6 +175,9 @@ export const galleryStore = {
     patch({ blurAmount: value })
     scheduleBokeh()
   },
+  setParallaxAmount(value: number): void {
+    patch({ parallaxAmount: Math.min(Math.max(value, 0), 1) })
+  },
   clearSpatialError(): void {
     if (state.spatialError) patch({ spatialError: null })
   }
@@ -297,10 +302,9 @@ export function statusText(snapshot: GallerySnapshot): string {
   if (!snapshot.currentPath || !snapshot.currentImage) {
     return '打开图片或将文件拖到窗口'
   }
-  const name = fileName(snapshot.currentPath)
   const count = `${snapshot.index + 1} / ${snapshot.items.length}`
   const size = `${Math.round(snapshot.pixelSize.width)} × ${Math.round(snapshot.pixelSize.height)}`
-  return `${name}    ${count}    ${size}`
+  return `${count}    ${size}`
 }
 
 export const canGoPrevious = (snapshot: GallerySnapshot): boolean => snapshot.items.length > 1
