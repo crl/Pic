@@ -6,10 +6,36 @@ interface PanoramaViewProps {
   image: HTMLImageElement
   spread: number
   bend: number
+  kind: 'panorama' | 'turntable'
+  panels: number
   onFirstFrame?: () => void
 }
 
-export function PanoramaView({ image, spread, bend, onFirstFrame }: PanoramaViewProps) {
+export function PanoramaView({
+  image,
+  spread,
+  bend,
+  kind,
+  panels,
+  onFirstFrame
+}: PanoramaViewProps) {
+  if (kind === 'turntable') {
+    return <TurntableView image={image} panels={Math.max(panels, 2)} onFirstFrame={onFirstFrame} />
+  }
+  return <CylinderPanoView image={image} spread={spread} bend={bend} onFirstFrame={onFirstFrame} />
+}
+
+function CylinderPanoView({
+  image,
+  spread,
+  bend,
+  onFirstFrame
+}: {
+  image: HTMLImageElement
+  spread: number
+  bend: number
+  onFirstFrame?: () => void
+}) {
   const hostRef = useRef<HTMLDivElement>(null)
   const onFirstFrameRef = useRef(onFirstFrame)
   onFirstFrameRef.current = onFirstFrame
@@ -242,4 +268,193 @@ function applyLimits(world: { yaw: number; pitch: number; limits: ViewLimits }):
   world.pitch = Math.min(Math.max(world.pitch, -world.limits.pitch), world.limits.pitch)
   if (world.limits.yaw == null) return
   world.yaw = Math.min(Math.max(world.yaw, -world.limits.yaw), world.limits.yaw)
+}
+
+function TurntableView({
+  image,
+  panels,
+  onFirstFrame
+}: {
+  image: HTMLImageElement
+  panels: number
+  onFirstFrame?: () => void
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const onFirstFrameRef = useRef(onFirstFrame)
+  onFirstFrameRef.current = onFirstFrame
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setClearColor(0xd7dde4, 1)
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    Object.assign(renderer.domElement.style, {
+      width: '100%',
+      height: '100%',
+      display: 'block',
+      cursor: 'grab',
+      touchAction: 'none'
+    })
+    host.appendChild(renderer.domElement)
+
+    const scene = new THREE.Scene()
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100)
+    const panelAspect = image.naturalWidth / panels / Math.max(image.naturalHeight, 1)
+    const planeH = 1.7
+    const planeW = planeH * panelAspect
+    const geometry = new THREE.PlaneGeometry(planeW, planeH)
+
+    const makeSlice = (): { mesh: THREE.Mesh; map: THREE.Texture; material: THREE.MeshBasicMaterial } => {
+      const map = new THREE.Texture(image)
+      map.colorSpace = THREE.SRGBColorSpace
+      map.minFilter = THREE.LinearFilter
+      map.magFilter = THREE.LinearFilter
+      map.generateMipmaps = false
+      map.wrapS = THREE.ClampToEdgeWrapping
+      map.wrapT = THREE.ClampToEdgeWrapping
+      map.repeat.set(1 / panels, 1)
+      map.needsUpdate = true
+      const material = new THREE.MeshBasicMaterial({
+        map,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+      const mesh = new THREE.Mesh(geometry, material)
+      scene.add(mesh)
+      return { mesh, map, material }
+    }
+
+    const a = makeSlice()
+    const b = makeSlice()
+
+    let yaw = 0
+    let pitch = 0.06
+    let radius = 2.55
+    let dragging = false
+    let lastX = 0
+    let lastY = 0
+    let running = true
+    let didReport = false
+
+    const applyView = (): void => {
+      const turn = ((yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
+      const slots = 4
+      const scaled = (turn / (Math.PI * 2)) * slots
+      const s0 = Math.floor(scaled) % slots
+      const frac = scaled - Math.floor(scaled)
+      const s1 = (s0 + 1) % slots
+      paintSlice(a, panels, s0)
+      paintSlice(b, panels, s1)
+      a.material.opacity = 1 - frac
+      b.material.opacity = frac
+      const cos = Math.cos(pitch)
+      camera.position.set(Math.sin(yaw) * cos * radius, Math.sin(pitch) * radius, Math.cos(yaw) * cos * radius)
+      camera.lookAt(0, 0, 0)
+    }
+
+    const resize = (): void => {
+      const width = Math.max(host.clientWidth, 1)
+      const height = Math.max(host.clientHeight, 1)
+      renderer.setSize(width, height, false)
+      camera.aspect = width / height
+      camera.updateProjectionMatrix()
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(host)
+    resize()
+    applyView()
+
+    const canvas = renderer.domElement
+    const onDown = (event: PointerEvent): void => {
+      dragging = true
+      lastX = event.clientX
+      lastY = event.clientY
+      canvas.setPointerCapture(event.pointerId)
+      canvas.style.cursor = 'grabbing'
+    }
+    const onMove = (event: PointerEvent): void => {
+      if (!dragging) return
+      yaw -= (event.clientX - lastX) * 0.008
+      pitch = Math.min(Math.max(pitch + (event.clientY - lastY) * 0.004, -0.35), 0.42)
+      lastX = event.clientX
+      lastY = event.clientY
+    }
+    const onUp = (event: PointerEvent): void => {
+      dragging = false
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
+      canvas.style.cursor = 'grab'
+    }
+    const onWheel = (event: WheelEvent): void => {
+      event.preventDefault()
+      radius = Math.min(Math.max(radius + event.deltaY * 0.002, 1.6), 4.2)
+    }
+
+    canvas.addEventListener('pointerdown', onDown)
+    canvas.addEventListener('pointermove', onMove)
+    canvas.addEventListener('pointerup', onUp)
+    canvas.addEventListener('pointercancel', onUp)
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+
+    const tick = (): void => {
+      if (!running) return
+      applyView()
+      renderer.render(scene, camera)
+      if (!didReport) {
+        didReport = true
+        onFirstFrameRef.current?.()
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+
+    return () => {
+      running = false
+      observer.disconnect()
+      canvas.removeEventListener('pointerdown', onDown)
+      canvas.removeEventListener('pointermove', onMove)
+      canvas.removeEventListener('pointerup', onUp)
+      canvas.removeEventListener('pointercancel', onUp)
+      canvas.removeEventListener('wheel', onWheel)
+      geometry.dispose()
+      a.material.dispose()
+      b.material.dispose()
+      a.map.dispose()
+      b.map.dispose()
+      renderer.dispose()
+      canvas.remove()
+    }
+  }, [image, panels])
+
+  return <div ref={hostRef} className="h-full w-full" />
+}
+
+function paintSlice(
+  slice: { mesh: THREE.Mesh; map: THREE.Texture },
+  panels: number,
+  slot: number
+): void {
+  const view = slotToView(slot, panels)
+  slice.map.repeat.set(1 / panels, 1)
+  slice.map.offset.set(view.index / panels, 0)
+  slice.mesh.scale.x = view.mirror ? -1 : 1
+}
+
+function slotToView(slot: number, panels: number): { index: number; mirror: boolean } {
+  if (panels === 3) {
+    const views = [
+      { index: 0, mirror: false },
+      { index: 1, mirror: false },
+      { index: 2, mirror: false },
+      { index: 1, mirror: true }
+    ]
+    return views[slot] ?? views[0]
+  }
+  if (panels === 2) {
+    return { index: slot === 0 || slot === 3 ? 0 : 1, mirror: false }
+  }
+  return { index: slot % panels, mirror: false }
 }

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
-import { readFile, readdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -35,6 +35,29 @@ function modelPath(): string {
     return join(process.resourcesPath, 'models', 'depth-anything-v2-small.onnx')
   }
   return join(app.getAppPath(), 'resources', 'models', 'depth-anything-v2-small.onnx')
+}
+
+function depthCacheDir(): string {
+  return join(app.getPath('userData'), 'depth-cache')
+}
+
+function depthCacheFile(key: string): string | null {
+  if (!/^[a-f0-9]{40}$/.test(key)) return null
+  return join(depthCacheDir(), `${key}.bin`)
+}
+
+async function pruneDepthCache(dir: string): Promise<void> {
+  const maxFiles = 48
+  const entries = (await readdir(dir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.bin'))
+    .map((entry) => join(dir, entry.name))
+  if (entries.length <= maxFiles) return
+  const ranked = await Promise.all(
+    entries.map(async (file) => ({ file, mtimeMs: (await stat(file)).mtimeMs }))
+  )
+  ranked.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  const extra = ranked.slice(0, ranked.length - maxFiles)
+  await Promise.all(extra.map((item) => unlink(item.file).catch(() => undefined)))
 }
 
 async function listImages(folder: string): Promise<string[]> {
@@ -301,7 +324,12 @@ function registerIpc(): void {
 
   ipcMain.handle('stat-path', async (_event, target: string) => {
     const info = await stat(target)
-    return { isDirectory: info.isDirectory(), isFile: info.isFile() }
+    return {
+      isDirectory: info.isDirectory(),
+      isFile: info.isFile(),
+      mtimeMs: info.mtimeMs,
+      size: info.size
+    }
   })
 
   ipcMain.handle('list-images', async (_event, folder: string) => listImages(folder))
@@ -314,6 +342,22 @@ function registerIpc(): void {
   ipcMain.handle('get-model-path', async () => {
     const path = modelPath()
     return existsSync(path) ? path : null
+  })
+
+  ipcMain.handle('read-depth-cache', async (_event, key: string) => {
+    const file = depthCacheFile(key)
+    if (!file || !existsSync(file)) return null
+    const buf = await readFile(file)
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+  })
+
+  ipcMain.handle('write-depth-cache', async (_event, key: string, data: ArrayBuffer) => {
+    const file = depthCacheFile(key)
+    if (!file) return
+    const dir = depthCacheDir()
+    await mkdir(dir, { recursive: true })
+    await writeFile(file, Buffer.from(data))
+    await pruneDepthCache(dir)
   })
 
   ipcMain.handle('dirname', (_event, target: string) => dirname(target))

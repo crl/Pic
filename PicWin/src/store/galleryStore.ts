@@ -4,7 +4,7 @@ import { DepthMap } from '../depth/DepthMap'
 import { depthFor } from '../depth/DepthProvider'
 import { depthSourceTitle } from '../depth/DepthMap'
 import { decodeImageFile, fileName, samePath } from './decodeImage'
-import { suggestedPanoControls } from '../depth/panorama'
+import { detectTurnaroundPanels, suggestedPanoControls } from '../depth/panorama'
 import { DisplayMode, Point, Size } from './types'
 
 export interface GallerySnapshot {
@@ -28,6 +28,8 @@ export interface GallerySnapshot {
   depthSourceLabel: string | null
   panoSpread: number
   panoBend: number
+  panoKind: 'panorama' | 'turntable'
+  panoPanels: number
 }
 
 const listeners = new Set<() => void>()
@@ -52,7 +54,9 @@ const state: GallerySnapshot = {
   bokehRevision: 0,
   depthSourceLabel: null,
   panoSpread: 0.5,
-  panoBend: 0.38
+  panoBend: 0.38,
+  panoKind: 'panorama',
+  panoPanels: 0
 }
 
 let snapshot: GallerySnapshot = { ...state }
@@ -272,6 +276,21 @@ async function loadCurrent(): Promise<void> {
 function enablePanorama(): void {
   if (!state.currentImage) return
   spatialToken += 1
+  const panels = detectTurnaroundPanels(state.currentImage)
+  if (panels) {
+    patch({
+      isSpatialMode: true,
+      isPanoramaMode: true,
+      spatialBusy: false,
+      spatialError: null,
+      depthMap: null,
+      bokehCanvas: null,
+      depthSourceLabel: '角色转盘',
+      panoKind: 'turntable',
+      panoPanels: panels
+    })
+    return
+  }
   const controls = suggestedPanoControls(state.pixelSize)
   patch({
     isSpatialMode: true,
@@ -282,7 +301,9 @@ function enablePanorama(): void {
     bokehCanvas: null,
     depthSourceLabel: '720 全景',
     panoSpread: controls.spread,
-    panoBend: controls.bend
+    panoBend: controls.bend,
+    panoKind: 'panorama',
+    panoPanels: 0
   })
 }
 
@@ -292,6 +313,9 @@ async function enableSpatial(): Promise<void> {
   if (!path || !image) return
   const token = ++spatialToken
   patch({ spatialBusy: true, spatialError: null, isPanoramaMode: false })
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
   try {
     const result = await depthFor(path, image)
     if (token !== spatialToken) return

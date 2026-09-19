@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { SpatialPhotoView } from '../depth/SpatialPhotoView'
 import { PanoramaView } from '../depth/PanoramaView'
 import { galleryStore, statusText, useGallery, canGoNext, canGoPrevious } from '../store/galleryStore'
+import { warmupDepth } from '../depth/DepthProvider'
 import { spreadToHaov } from '../depth/panorama'
 import { Size } from '../store/types'
 import { EmptyDropView } from '../viewer/EmptyDropView'
@@ -22,6 +23,13 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void warmupDepth()
+    }, 400)
+    return () => window.clearTimeout(timer)
   }, [])
 
   return (
@@ -180,6 +188,8 @@ function Viewer() {
               image={original}
               spread={store.panoSpread}
               bend={store.panoBend}
+              kind={store.panoKind}
+              panels={store.panoPanels}
               onFirstFrame={revealSpatial}
             />
           </div>
@@ -225,6 +235,11 @@ function Viewer() {
           </div>
         </div>
       </div>
+      {store.spatialBusy ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <span className="pic-spin" />
+        </div>
+      ) : null}
       <OverlayChrome />
     </div>
   )
@@ -386,7 +401,7 @@ function OverlayChrome() {
               <span className="shrink-0">{store.depthSourceLabel}</span>
             </>
           ) : null}
-          {store.isSpatialMode && store.isPanoramaMode ? (
+          {store.isSpatialMode && store.isPanoramaMode && store.panoKind !== 'turntable' ? (
             <>
               <div className="flex min-w-0 flex-1 items-center gap-2.5 text-white">
                 <span className="shrink-0">张角</span>
@@ -451,7 +466,11 @@ function OverlayChrome() {
           )}
           {store.isSpatialMode ? (
             <span className="shrink-0">
-              {store.isPanoramaMode ? '拖动环视 · 滚轮缩放' : '移动鼠标看立体 · 点击对焦'}
+              {store.isPanoramaMode
+                ? store.panoKind === 'turntable'
+                  ? '拖动旋转角色 · 滚轮缩放'
+                  : '拖动环视 · 滚轮缩放'
+                : '移动鼠标看立体 · 点击对焦'}
             </span>
           ) : null}
         </div>

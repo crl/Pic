@@ -13,7 +13,7 @@ async function loadOrt() {
   const prefix = wasmPrefix()
   ort.env.wasm.numThreads = 1
   ort.env.wasm.simd = true
-  ort.env.wasm.proxy = false
+  ort.env.wasm.proxy = true
   ort.env.wasm.wasmPaths = {
     mjs: `${prefix}ort-wasm-simd-threaded.mjs`,
     wasm: `${prefix}ort-wasm-simd-threaded.wasm`
@@ -36,19 +36,24 @@ function modelUrl(): string {
 async function createSession() {
   try {
     const ort = await loadOrt()
+    const open = async (): Promise<import('onnxruntime-web').InferenceSession> => {
+      try {
+        return await ort.InferenceSession.create(modelUrl(), { executionProviders: ['wasm'] })
+      } catch {
+        const modelPath = await window.pic.getModelPath()
+        if (!modelPath) throw new DepthError(depthErrors.modelMissing)
+        const buffer = await window.pic.readFile(modelPath)
+        const model = tightBytes(buffer)
+        if (model.byteLength < 1_000_000) throw new DepthError(depthErrors.modelMissing)
+        return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
+      }
+    }
     try {
-      return await ort.InferenceSession.create(modelUrl(), { executionProviders: ['wasm'] })
-    } catch {
-      const modelPath = await window.pic.getModelPath()
-      if (!modelPath) {
-        throw new DepthError(depthErrors.modelMissing)
-      }
-      const buffer = await window.pic.readFile(modelPath)
-      const model = tightBytes(buffer)
-      if (model.byteLength < 1_000_000) {
-        throw new DepthError(depthErrors.modelMissing)
-      }
-      return await ort.InferenceSession.create(model, { executionProviders: ['wasm'] })
+      return await open()
+    } catch (error) {
+      if (!ort.env.wasm.proxy) throw error
+      ort.env.wasm.proxy = false
+      return await open()
     }
   } catch (error) {
     sessionPromise = null
@@ -113,13 +118,19 @@ function inputSize(sessionLike: import('onnxruntime-web').InferenceSession, inpu
   return { width: 518, height: 518 }
 }
 
-function upsampleDepth(
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
+async function upsampleDepth(
   values: Float32Array,
   srcWidth: number,
   srcHeight: number,
   dstWidth: number,
   dstHeight: number
-): Float32Array {
+): Promise<Float32Array> {
   const out = new Float32Array(dstWidth * dstHeight)
   for (let y = 0; y < dstHeight; y++) {
     const v = dstHeight === 1 ? 0 : y / (dstHeight - 1)
@@ -141,6 +152,7 @@ function upsampleDepth(
       const b = v01 * (1 - tx) + v11 * tx
       out[y * dstWidth + x] = a * (1 - ty) + b * ty
     }
+    if (y % 48 === 47) await yieldToPaint()
   }
   return out
 }
@@ -157,8 +169,10 @@ export async function estimateDepth(image: HTMLImageElement): Promise<DepthMap> 
     throw new DepthError(depthErrors.modelOutput)
   }
   const size = inputSize(ml, inputName)
+  await yieldToPaint()
   const pixels = resizeImageToCanvas(image, size.width, size.height)
   const tensor = imageDataToTensor(pixels, ort.Tensor)
+  await yieldToPaint()
   const result = await ml.run({ [inputName]: tensor })
   const output = result[outputName]
   if (!output) {
@@ -172,12 +186,25 @@ export async function estimateDepth(image: HTMLImageElement): Promise<DepthMap> 
   const dims = output.dims
   const srcHeight = dims.length >= 3 ? Number(dims[dims.length - 2]) : size.height
   const srcWidth = dims.length >= 3 ? Number(dims[dims.length - 1]) : size.width
-  const upsampled = upsampleDepth(
-    floats,
-    srcWidth,
-    srcHeight,
-    image.naturalWidth,
-    image.naturalHeight
-  )
-  return DepthMap.fromValues(upsampled, image.naturalWidth, image.naturalHeight, false)
+  const outSize = cappedSize(image.naturalWidth, image.naturalHeight, 640)
+  const upsampled = await upsampleDepth(floats, srcWidth, srcHeight, outSize.width, outSize.height)
+  return DepthMap.fromValues(upsampled, outSize.width, outSize.height, false)
+}
+
+export async function warmupDepth(): Promise<void> {
+  try {
+    await session()
+  } catch {
+    sessionPromise = null
+  }
+}
+
+function cappedSize(width: number, height: number, maxEdge: number): { width: number; height: number } {
+  const longEdge = Math.max(width, height, 1)
+  if (longEdge <= maxEdge) return { width, height }
+  const scale = maxEdge / longEdge
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale))
+  }
 }

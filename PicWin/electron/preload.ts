@@ -31,11 +31,16 @@ window.addEventListener(
 
 const api = {
   openDialog: (kind: OpenKind = 'file'): Promise<string | null> => ipcRenderer.invoke('open-dialog', kind),
-  statPath: (target: string): Promise<{ isDirectory: boolean; isFile: boolean }> =>
+  statPath: (
+    target: string
+  ): Promise<{ isDirectory: boolean; isFile: boolean; mtimeMs: number; size: number }> =>
     ipcRenderer.invoke('stat-path', target),
   listImages: (folder: string): Promise<string[]> => ipcRenderer.invoke('list-images', folder),
   readFile: (target: string): Promise<ArrayBuffer> => ipcRenderer.invoke('read-file', target),
   getModelPath: (): Promise<string | null> => ipcRenderer.invoke('get-model-path'),
+  readDepthCache: (key: string): Promise<ArrayBuffer | null> => ipcRenderer.invoke('read-depth-cache', key),
+  writeDepthCache: (key: string, data: ArrayBuffer): Promise<void> =>
+    ipcRenderer.invoke('write-depth-cache', key, data),
   dirname: (target: string): Promise<string> => ipcRenderer.invoke('dirname', target),
   basename: (target: string): Promise<string> => ipcRenderer.invoke('basename', target),
   ready: (): void => ipcRenderer.send('renderer-ready'),
